@@ -1,0 +1,103 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "mcp-stock-server"
+version = "1.0.0"
+description = "MCP server for Chinese stock data analysis using Akshare"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+authors = [
+    {name = "alucardzeng", email = "alucardzhb@gmail.com"}
+]
+keywords = [
+    "mcp",
+    "akshare",
+    "stock",
+    "finance",
+    "chinese-stocks",
+    "fastmcp",
+    "llm"
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Office/Business :: Financial",
+    "Topic :: Office/Business :: Financial :: Investment",
+    "Topic :: Scientific/Engineering :: Information Analysis",
+]
+
+dependencies = [
+    "fastmcp>=0.4.0",
+    "akshare>=1.12.0",
+    "pandas>=2.0.0",
+    "numpy>=1.24.0",
+    "python-dateutil>=2.8.0",
+    "structlog>=23.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-asyncio>=0.21.0",
+    "pytest-cov>=4.1.0",
+    "black>=23.0.0",
+    "mypy>=1.0.0",
+    "ruff>=0.1.0",
+    "pre-commit>=3.6.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/alucardzh/mcp-stock-server"
+Repository = "https://github.com/alucardzh/mcp-stock-server"
+Documentation = "https://github.com/alucardzh/mcp-stock-server/blob/main/README.md"
+"Bug Tracker" = "https://github.com/alucardzh/mcp-stock-server/issues"
+
+[project.scripts]
+mcp-stock-server = "mcp_stock_server:main"
+
+[tool.hatch.version]
+path = ".hatch"
+
+[tool.hatch.envs.default]
+dependencies = [
+    "fastmcp[cli]",
+    "akshare",
+    "pandas",
+    "numpy",
+    "python-dateutil",
+]
+
+[tool.ruff]
+line-length = 88
+target-version = "py313"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "UP", "YTT"]
+ignore = ["E501", "E402"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "auto"
+
+[tool.mypy]
+python_version = "3.10"
+warn_return_any = true
+strict_optional = true
+
+[[tool.mypy.overrides]]
+module = [
+    "akshare.*",
+    "pandas.*",
+    "numpy.*",
+]
+ignore_missing_imports = true
