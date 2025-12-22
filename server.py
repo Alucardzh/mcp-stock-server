@@ -91,7 +91,7 @@ def get_stock_history_tool(
     """Get historical stock data for a Chinese stock.
 
     Args:
-        symbol: 6-digit stock symbol (e.g., '000001')
+        symbol: 6-digit stock symbol (e.g., '000001') or Chinese stock name
         start_date: Start date in YYYY-MM-DD format (optional)
         end_date: End date in YYYY-MM-DD format (optional)
         period: Data period - daily, weekly, or monthly (default: daily)
@@ -105,7 +105,7 @@ def get_stock_realtime_tool(symbol: str) -> str:
     """Get real-time stock data for a Chinese stock.
 
     Args:
-        symbol: 6-digit stock symbol (e.g., '000001')
+        symbol: 6-digit stock symbol (e.g., '000001') or Chinese stock name
     """
     return get_stock_realtime(symbol)
 
@@ -115,7 +115,7 @@ def get_stock_basic_tool(symbol: str) -> str:
     """Get basic information about a Chinese stock.
 
     Args:
-        symbol: 6-digit stock symbol (e.g., '000001')
+        symbol: 6-digit stock symbol (e.g., '000001') or Chinese stock name
     """
     return get_stock_basic(symbol)
 
@@ -129,7 +129,7 @@ def calculate_support_resistance_tool(
     """Calculate support and resistance levels for a stock.
 
     Args:
-        symbol: 6-digit stock symbol (e.g., '000001')
+        symbol: 6-digit stock symbol (e.g., '000001') or Chinese stock name
         n_levels: Number of support/resistance levels to identify (1-10, default: 5)
         lookback_period: Analysis period in days (30-365, default: 60)
     """

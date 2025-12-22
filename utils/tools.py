@@ -11,9 +11,12 @@ __all__ = ["get_stock_history", "get_stock_realtime", "get_stock_basic",
 import json
 import logging
 import pandas as pd
-from akshare import (stock_zh_a_hist, stock_zh_a_spot_em, stock_info_a_code_name,
-                     stock_zh_index_spot_em, stock_individual_info_em,)
-from .validate import validate_stock_symbol, parse_date_range, format_stock_data
+from akshare import (
+    stock_zh_a_hist, stock_zh_a_spot_em,
+    stock_zh_index_spot_em, stock_individual_info_em,)
+from .validate import (
+    validate_stock_symbol,
+    parse_date_range, format_stock_data, NAME_CODE,)
 from .support_resistance import calculate_support_resistance
 # Import our analysis modules
 
@@ -24,8 +27,6 @@ logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
-df = stock_info_a_code_name()
-NAME_CODE: dict[str, str] = dict(zip(df['name'], df['code']))
 
 
 def get_stock_history(
@@ -48,14 +49,11 @@ def get_stock_history(
         symbol = validate_stock_symbol(symbol)
         start_date, end_date = parse_date_range(
             start_date, end_date, default_period_days=90)
-
         logger.info("Fetching historical data for %s", symbol)
-
         # Format dates for akshare
         start_date_formatted = start_date.replace(
             "-", "") if start_date else ""
         end_date_formatted = end_date.replace("-", "") if end_date else ""
-
         # Fetch data from Akshare
         data = stock_zh_a_hist(
             symbol=symbol,
@@ -64,23 +62,19 @@ def get_stock_history(
             end_date=end_date_formatted,
             adjust=adjust
         )
-
         if data is None or data.empty:
             return json.dumps({
                 "success": False,
                 "error": f"No historical data found for symbol {symbol}"
             }, ensure_ascii=False, indent=2)
-
         # Format response
         response = format_stock_data(data)
-
         if response.success:
             return json.dumps(response.model_dump(exclude_none=True), ensure_ascii=False, indent=2)
         return json.dumps({
             "success": False,
             "error": response.error
         }, ensure_ascii=False, indent=2)
-
     except Exception as e:
         logger.error("Error fetching stock history: %s", e)
         return json.dumps({
@@ -97,18 +91,14 @@ def get_stock_realtime(symbol: str) -> str:
     """
     try:
         symbol = validate_stock_symbol(symbol)
-
         logger.info("Fetching real-time data for %s", symbol)
-
         # Fetch data from Akshare
         data = stock_zh_a_spot_em()
-
         if data is None or data.empty:
             return json.dumps({
                 "success": False,
                 "error": f"No real-time data found for symbol {symbol}"
             }, ensure_ascii=False, indent=2)
-
         # Find the specific stock
         stock_data = data[data['代码'] == symbol]
         if stock_data.empty:
@@ -116,7 +106,6 @@ def get_stock_realtime(symbol: str) -> str:
                 "success": False,
                 "error": f"Stock {symbol} not found in real-time data"
             }, ensure_ascii=False, indent=2)
-
         # Format response
         result = {
             "success": True,
@@ -138,9 +127,7 @@ def get_stock_realtime(symbol: str) -> str:
                 "source": "akshare_realtime"
             }
         }
-
         return json.dumps(result, ensure_ascii=False, indent=2)
-
     except Exception as e:
         logger.error("Error fetching real-time data: %s", e)
         return json.dumps({
@@ -157,12 +144,9 @@ def get_stock_basic(symbol: str) -> str:
     """
     try:
         symbol = validate_stock_symbol(symbol)
-
         logger.info("Fetching basic info for %s", symbol)
-
         # Fetch individual stock info from Akshare
         data = stock_individual_info_em(symbol=symbol)
-
         if data is None or data.empty:
             return json.dumps({
                 "success": False,
@@ -194,7 +178,6 @@ def get_stock_basic(symbol: str) -> str:
             }
         }
         return json.dumps(result, ensure_ascii=False, indent=2)
-
     except Exception as e:
         logger.error("Error fetching basic info: %s", e)
         return json.dumps({
@@ -217,15 +200,12 @@ def calculate_support_resistance_func(
     """
     try:
         symbol = validate_stock_symbol(symbol)
-
         logger.info("Calculating support/resistance for %s", symbol)
-
         # Get historical data for calculation
         start_date, end_date = parse_date_range(
             None, None, default_period_days=180)
         start_date_formatted = start_date.replace("-", "")
         end_date_formatted = end_date.replace("-", "")
-
         hist_data = stock_zh_a_hist(
             symbol=symbol,
             period="daily",
@@ -238,7 +218,6 @@ def calculate_support_resistance_func(
                 "success": False,
                 "error": f"No historical data found for {symbol} to calculate support/resistance"
             }, ensure_ascii=False, indent=2)
-
         # Calculate support and resistance
         # Use correct column name for closing price
         close_col = '收盘' if '收盘' in hist_data.columns else 'close'
@@ -257,12 +236,11 @@ def calculate_support_resistance_func(
             }
         }}
         return json.dumps(result, ensure_ascii=False, indent=2)
-
     except Exception as e:
         logger.error("Error calculating support/resistance: %s", e)
         return json.dumps({
             "success": False,
-            "error": f"Error calculating support/resistance: {str(e)}"
+            "error": f"Error calculating support/resistance: {e}"
         }, ensure_ascii=False, indent=2)
 
 
@@ -274,16 +252,13 @@ def get_market_index(index_code: str = "000001") -> str:
     """
     try:
         logger.info("Fetching market index data for %s", index_code)
-
         # Fetch index data from Akshare
         data = stock_zh_index_spot_em()
-
         if data is None or data.empty:
             return json.dumps({
                 "success": False,
                 "error": f"No index data found for code {index_code}"
             }, ensure_ascii=False, indent=2)
-
         # Find the specific index
         index_data = data[data['代码'] == index_code]
         if index_data.empty:
@@ -291,7 +266,6 @@ def get_market_index(index_code: str = "000001") -> str:
                 "success": False,
                 "error": f"Index {index_code} not found in index data"
             }, ensure_ascii=False, indent=2)
-
         # Format response
         if len(index_data) > 0:
             index = index_data.iloc[0]
@@ -309,7 +283,6 @@ def get_market_index(index_code: str = "000001") -> str:
                     "source": "akshare_index"
                 }
             }
-
             return json.dumps(result, ensure_ascii=False, indent=2)
         return json.dumps({
             "success": False,

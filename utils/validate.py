@@ -7,13 +7,18 @@
  '''
 
 
-__all__ = ["validate_stock_symbol", "parse_date_range", "format_stock_data"]
+__all__ = ["validate_stock_symbol", "parse_date_range",
+           "format_stock_data", "NAME_CODE",]
 from typing import Any
 from datetime import datetime, date, timedelta
 import logging
 import pandas as pd
+from akshare import stock_info_a_code_name
 from .schema import StockDataResponse
 
+
+df = stock_info_a_code_name()
+NAME_CODE: dict[str, str] = dict(zip(df['name'], df['code']))
 # Configure logging
 logging.basicConfig(
     level=logging.WARNING,
@@ -32,10 +37,13 @@ def validate_stock_symbol(symbol: str) -> str:
 
     # Basic validation for Chinese stock symbols (6 digits)
     if not (len(symbol) == 6 and symbol.isdigit()):
-        raise ValueError(
-            "Invalid stock symbol format. Expected 6 digits for A-share stocks"
-        )
-
+        code = [code for n, code in NAME_CODE.items() if symbol in n]
+        if len(code):
+            return code[0]
+        else:
+            raise ValueError(
+                "Invalid stock symbol format. Expected 6 digits for A-share stocks"
+            )
     return symbol
 
 
@@ -70,18 +78,11 @@ def parse_date_range(
             raise ValueError(
                 f"Invalid end_date format. Use YYYY-MM-DD, got: {end_date}"
             ) from exc
-
-    # Set defaults
-    if not start_date_obj:
-        if end_date_obj:
-            start_date_obj = end_date_obj - timedelta(days=default_period_days)
-        else:
-            end_date_obj = date.today()
-            start_date_obj = end_date_obj - timedelta(days=default_period_days)
-
     if not end_date_obj:
         end_date_obj = date.today()
-
+    # Set defaults
+    if not start_date_obj:
+        start_date_obj = end_date_obj - timedelta(days=default_period_days)
     return start_date_obj.strftime("%Y-%m-%d"), end_date_obj.strftime("%Y-%m-%d")
 
 
