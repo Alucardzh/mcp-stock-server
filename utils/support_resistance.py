@@ -29,18 +29,21 @@ def calculate_support_resistance(
         lookback_period = len(prices)
 
     # 使用最近的数据
-    recent_prices = prices.iloc[-lookback_period:].values
+    recent_prices = prices.iloc[-lookback_period:]
+
+    # 确保转换为 numpy 数组
+    price_array = np.asarray(recent_prices, dtype=float)
 
     # 1. 将价格范围分成多个分位点
-    price_min = np.min(recent_prices)
-    price_max = np.max(recent_prices)
+    price_min = float(np.min(price_array))
+    price_max = float(np.max(price_array))
     price_range = price_max - price_min
 
     # 2. 使用分位数识别关键价格区域
     # 支撑位：价格在底部区域停留的时间较长
     # 压力位：价格在顶部区域停留的时间较长
     n_bins = 100  # 将价格分成100个区间
-    hist, bin_edges = np.histogram(recent_prices, bins=n_bins)
+    hist, bin_edges = np.histogram(price_array, bins=n_bins)
 
     # 3. 找到成交量（停留时间）最高的几个区域
     # 这里用价格停留的频率代替成交量

@@ -24,8 +24,8 @@ logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
-NAME_CODE = stock_info_a_code_name()
-NAME_CODE = dict(zip(NAME_CODE['name'], NAME_CODE['code']))
+df = stock_info_a_code_name()
+NAME_CODE: dict[str, str] = dict(zip(df['name'], df['code']))
 
 
 def get_stock_history(
@@ -161,7 +161,6 @@ def get_stock_basic(symbol: str) -> str:
         logger.info("Fetching basic info for %s", symbol)
 
         # Fetch individual stock info from Akshare
-        # stock_individual_info_em returns detailed information including industry, company info, etc.
         data = stock_individual_info_em(symbol=symbol)
 
         if data is None or data.empty:
@@ -248,9 +247,7 @@ def calculate_support_resistance_func(
             n_levels=n_levels,
             lookback_period=min(lookback_period, len(hist_data))
         )
-
-        # Add additional metadata
-        result.update({
+        result = {**result, **{
             "success": True,
             "symbol": symbol,
             "calculation_date": pd.Timestamp.now().isoformat(),
@@ -258,8 +255,7 @@ def calculate_support_resistance_func(
                 "n_levels": n_levels,
                 "lookback_period": lookback_period
             }
-        })
-
+        }}
         return json.dumps(result, ensure_ascii=False, indent=2)
 
     except Exception as e:
