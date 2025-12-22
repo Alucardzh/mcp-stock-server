@@ -7,7 +7,7 @@
  '''
 
 from typing import Any
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class StockDataResponse(BaseModel):
@@ -34,3 +34,11 @@ class SupportResistanceResult(BaseModel):
     volatility: float
     price_trend: str
     data_points_analyzed: int
+
+
+class StockCalLimit(BaseModel):
+    """个人方法计算所需参数"""
+    limit: int = Field(default=100, ge=1, le=100, description="返回股票数量限制，范围1-100")
+    span: str = Field(default="hour", pattern="^(day|hour)$", description="时间跨度，只能是'day'(今日榜)或'hour'(近1小时榜)")
+    total_market_value: int = Field(default=200, ge=200, description="流通市值上限（亿元），最小值200")
+    has_front: bool = Field(default=False, description="是否包含前排股，True表示包含，False表示不包含")
