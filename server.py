@@ -7,17 +7,17 @@ using Akshare API and FastMCP framework following PEP 723 standards.
 """
 
 import os
-import json
 import logging
 from fastmcp import FastMCP
 # Import our analysis modules
-from utils.tools import (
+from utils import (
     get_stock_history,
     get_stock_realtime,
     get_stock_basic,
     calculate_support_resistance_func,
     get_market_index,
-    get_stock_symbol_by_name
+    get_stock_symbol_by_name,
+    get_ths_hot_list
 )
 
 
@@ -31,6 +31,17 @@ logger = logging.getLogger(__name__)
 
 # Create FastMCP server instance
 mcp = FastMCP("MCP Akshare Stock Server")
+
+
+@mcp.tool
+def get_ths_hot_list_tool(span: str, limit: int = 100) -> str:
+    """Get hot list from 同花顺
+
+    Args:
+        span (str): only two choice[day, hour]: 1.hour means 近1小时榜, 2.day means 今日榜
+        limit: a number range from 1 to 100, default=100, control return list len
+    """
+    return get_ths_hot_list(span, limit)
 
 
 @mcp.tool()

@@ -67,6 +67,13 @@ mcp-stock-server = "mcp_stock_server:main"
 [tool.hatch.version]
 path = ".hatch"
 
+[tool.hatch.build.targets.wheel]
+include = [
+    "server.py",
+    "utils/",
+]
+packages = ["."]
+
 [tool.hatch.envs.default]
 dependencies = [
     "fastmcp[cli]",
