@@ -25,9 +25,46 @@ uv sync
 uv run server.py
 ```
 
+### Transport 模式
+
+本服务器支持三种 transport 模式：
+
+#### 1. **HTTP Transport** (默认，推荐)
+适合生产环境、Docker 部署和远程访问：
+
+```bash
+# 直接运行（默认 HTTP 模式，端口 8000）
+uv run server.py
+
+# 或通过环境变量指定
+MCP_TRANSPORT=http MCP_PORT=8000 uv run server.py
+```
+
+**优点**：
+- ✅ 稳定可靠，连接自动管理
+- ✅ 支持负载均衡和反向代理
+- ✅ 适合多客户端并发访问
+- ✅ 易于监控和调试
+
+#### 2. **SSE Transport** (遗留模式)
+仅用于向后兼容：
+
+```bash
+MCP_TRANSPORT=sse MCP_PORT=8000 uv run server.py
+```
+
+⚠️ **注意**：SSE 是遗留模式，建议迁移到 HTTP transport
+
+#### 3. **STDIO Transport** (本地进程)
+适合本地开发和调试：
+
+```bash
+MCP_TRANSPORT=stdio uv run server.py
+```
+
 ### 配置 CherryStudio
 
-在 CherryStudio 中配置 MCP 服务器：
+在 CherryStudio 中配置 MCP 服务器（使用 STDIO 模式）：
 
 ```json
 {
@@ -43,6 +80,16 @@ uv run server.py
   }
 }
 ```
+
+### Docker 部署
+
+使用 Docker Compose 部署（HTTP 模式，端口 18881）：
+
+```bash
+docker-compose up -d
+```
+
+服务将在 `http://localhost:18881` 启动
 
 ## 工具列表
 

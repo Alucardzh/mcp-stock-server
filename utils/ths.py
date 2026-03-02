@@ -1,14 +1,16 @@
-'''
- # @ Author: Alucard
- # @ Create Time: 2025-12-22 11:51:09
- # @ Modified by: Alucard
- # @ Modified time: 2025-12-22 11:55:34
- # @ Description:
- '''
-__all__ = ['get_ths_hot_list']
+"""
+# @ Author: Alucard
+# @ Create Time: 2025-12-22 11:51:09
+# @ Modified by: Alucard
+# @ Modified time: 2025-12-22 11:55:34
+# @ Description:
+"""
+
+__all__ = ["get_ths_hot_list"]
 
 
 import json
+
 import requests
 
 HEADERS = {
@@ -49,7 +51,7 @@ def get_ths_hot_list(span: str, limit: int) -> str:
                 "涨幅": item.get("rise_and_fall", 0),
                 "标签": ",".join(item["tag"].get("concept_tag", [])),
                 "上榜标签": item["tag"].get("popularity_tag", ""),
-                "上榜原因": f'{item.get("analyse_title", "")} {item.get("analyse", "")}'
+                "上榜原因": f"{item.get('analyse_title', '')} {item.get('analyse', '')}",
             }
             for item in stock_list
         ]

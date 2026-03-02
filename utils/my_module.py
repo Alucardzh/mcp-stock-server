@@ -1,18 +1,21 @@
-'''
- # @ Author: Alucard
- # @ Create Time: 2025-12-22 12:30:42
- # @ Modified by: Alucard
- # @ Modified time: 2025-12-22 12:31:14
- # @ Description:
-'''
-__all__ = ['StockCal']
+"""
+# @ Author: Alucard
+# @ Create Time: 2025-12-22 12:30:42
+# @ Modified by: Alucard
+# @ Modified time: 2025-12-22 12:31:14
+# @ Description:
+"""
+
+__all__ = ["StockCal"]
 
 import json
 from datetime import datetime, timedelta
+
 import pandas as pd
-from akshare import stock_zt_pool_em, tool_trade_date_hist_sina, stock_zh_a_hist
-from .ths import get_ths_hot_list
+from akshare import stock_zh_a_hist, stock_zt_pool_em, tool_trade_date_hist_sina
+
 from .schema import StockCalLimit
+from .ths import get_ths_hot_list
 
 
 def get_last_trade_date() -> str:
@@ -26,13 +29,13 @@ def get_last_trade_date() -> str:
         trade_calendar.trade_date <= today_date
     ].trade_date.values.tolist()
     now_time = datetime.now().strftime("%H%M")
-    trade_date = trade_calendar[-1 if is_trade else -
-                                2 if int(now_time) < 930 else -1]
+    trade_date = trade_calendar[-1 if is_trade else -2 if int(now_time) < 930 else -1]
     return trade_date.strftime("%Y%m%d")
 
 
 class StockCal:
     """个人选股计算方法"""
+
     def __init__(self, data: StockCalLimit) -> None:
         self.limit = data.limit
         self.span = data.span
@@ -95,8 +98,7 @@ class StockCal:
         df2 = self.get_limit_list()
         if df1 and df2.shape[0]:
             df1 = pd.DataFrame(json.loads(df1))
-            merged_df = pd.merge(df1, df2, on=[
-                                 "代码", "名称"], how="inner")
+            merged_df = pd.merge(df1, df2, on=["代码", "名称"], how="inner")
             if merged_df.shape[0]:
                 merged_df = merged_df[
                     [
@@ -133,8 +135,7 @@ class StockCal:
                 )
                 codes = merged_df["代码"].values.tolist()
                 high_prices = [
-                    {"代码": code, **self.get_high_price(symbol=code)}
-                    for code in codes
+                    {"代码": code, **self.get_high_price(symbol=code)} for code in codes
                 ]
                 df = pd.DataFrame(high_prices)
                 merged_df = pd.merge(merged_df, df, on=["代码"], how="inner")
@@ -170,8 +171,7 @@ class StockCal:
 
         # 4. 计算三段区间的最高价
         high_365 = df["最高"].max()
-        high_ytd = df.loc[df["日期"] >= pd.Timestamp(
-            year_start.date()), "最高"].max()
+        high_ytd = df.loc[df["日期"] >= pd.Timestamp(year_start.date()), "最高"].max()
         high_180 = df.loc[df["日期"] >= pd.Timestamp(day_180.date()), "最高"].max()
         return {
             "当前价格": df.iloc[-1]["收盘"],
@@ -187,7 +187,7 @@ class StockCal:
         df = self.get_basic_list()
         if df.shape[0]:
             message = "数据更新成功"
-            data = df.to_dict('records')
+            data = df.to_dict("records")
         else:
             now = datetime.now().strftime("%H%M")
             message = "没有获取到数据"

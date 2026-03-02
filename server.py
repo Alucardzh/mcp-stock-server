@@ -6,32 +6,38 @@ This module provides MCP-compliant server for Chinese stock data analysis
 using Akshare API and FastMCP framework following PEP 723 standards.
 """
 
-import os
 import logging
+import os
+
 from fastmcp import FastMCP
+
 # Import our analysis modules
 from utils import (
-    get_stock_history,
-    get_stock_realtime,
-    get_stock_basic,
+    StockCal,
     calculate_support_resistance_func,
     get_market_index,
+    get_stock_basic,
+    get_stock_history,
+    get_stock_realtime,
     get_stock_symbol_by_name,
     get_ths_hot_list,
-    StockCal
 )
 from utils.schema import StockCalLimit
 
 # Configure logging
 logging.basicConfig(
-    level=logging.WARNING,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    level=logging.WARNING, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
 
 
 # Create FastMCP server instance
 mcp = FastMCP("MCP Akshare Stock Server")
+
+
+def format_symbol(symbol: str) -> str:
+    """格式化symbol"""
+    return symbol.replace("'", "").replace('"', "")
 
 
 @mcp.tool
@@ -59,7 +65,7 @@ def suggestion_by_my_method(data: StockCalLimit) -> str:
 
 
 @mcp.tool
-def get_ths_hot_list_tool(span: str = 'hour', limit: int = 100) -> str:
+def get_ths_hot_list_tool(span: str = "hour", limit: int = 100) -> str:
     """Get hot list from 同花顺
 
     Args:
@@ -86,7 +92,7 @@ def get_stock_history_tool(
     start_date: str | None = None,
     end_date: str | None = None,
     period: str = "daily",
-    adjust: str = "qfq"
+    adjust: str = "qfq",
 ) -> str:
     """Get historical stock data for a Chinese stock.
 
@@ -97,7 +103,9 @@ def get_stock_history_tool(
         period: Data period - daily, weekly, or monthly (default: daily)
         adjust: Price adjustment - qfq, hfq, or none (default: qfq)
     """
-    return get_stock_history(symbol, start_date, end_date, period, adjust)
+    return get_stock_history(
+        format_symbol(symbol), start_date, end_date, period, adjust
+    )
 
 
 @mcp.tool()
@@ -107,7 +115,7 @@ def get_stock_realtime_tool(symbol: str) -> str:
     Args:
         symbol: 6-digit stock symbol (e.g., '000001') or Chinese stock name
     """
-    return get_stock_realtime(symbol)
+    return get_stock_realtime(format_symbol(symbol))
 
 
 @mcp.tool()
@@ -117,14 +125,12 @@ def get_stock_basic_tool(symbol: str) -> str:
     Args:
         symbol: 6-digit stock symbol (e.g., '000001') or Chinese stock name
     """
-    return get_stock_basic(symbol)
+    return get_stock_basic(format_symbol(symbol))
 
 
 @mcp.tool()
 def calculate_support_resistance_tool(
-    symbol: str,
-    n_levels: int = 5,
-    lookback_period: int = 60
+    symbol: str, n_levels: int = 5, lookback_period: int = 60
 ) -> str:
     """Calculate support and resistance levels for a stock.
 
@@ -133,7 +139,9 @@ def calculate_support_resistance_tool(
         n_levels: Number of support/resistance levels to identify (1-10, default: 5)
         lookback_period: Analysis period in days (30-365, default: 60)
     """
-    return calculate_support_resistance_func(symbol, n_levels, lookback_period)
+    return calculate_support_resistance_func(
+        format_symbol(symbol), n_levels, lookback_period
+    )
 
 
 @mcp.tool()
@@ -143,7 +151,7 @@ def get_market_index_tool(index_code: str = "000001") -> str:
     Args:
         index_code: Index code (default: 000001 for Shanghai Composite)
     """
-    return get_market_index(index_code)
+    return get_market_index(format_symbol(index_code))
 
 
 @mcp.prompt()
@@ -216,7 +224,26 @@ def main():
     # JSON-RPC messages go to stdout, logs go to stderr
     os.environ["PYTHONUNBUFFERED"] = "1"
     logger.info("Starting MCP Akshare Server with FastMCP")
-    mcp.run()
+
+    # 支持通过环境变量切换传输模式
+    # 默认: http (Streamable HTTP) - 稳定可靠，适合生产环境
+    transport = os.getenv("MCP_TRANSPORT", "http")
+    port = int(os.getenv("MCP_PORT", "8000"))
+    host = os.getenv("MCP_HOST", "0.0.0.0")
+
+    if transport == "http":
+        # 推荐: Streamable HTTP transport
+        logger.info("Running in HTTP mode on %s:%s", host, port)
+        mcp.run(transport="http", host=host, port=port)
+    elif transport == "sse":
+        # SSE transport (legacy, 仅用于兼容旧版本)
+        logger.warning("SSE transport is legacy, consider using HTTP transport instead")
+        logger.info("Running in SSE mode on %s:%s", host, port)
+        mcp.run(transport="sse", host=host, port=port)
+    else:
+        # stdio 模式 (用于本地进程通信)
+        logger.info("Running in stdio mode")
+        mcp.run()
 
 
 if __name__ == "__main__":
