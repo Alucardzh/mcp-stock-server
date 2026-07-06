@@ -14,6 +14,7 @@ __all__ = [
     "get_market_index",
     "get_stock_symbol_by_name",
 ]
+from os import getenv
 import functools
 import json
 import logging
@@ -25,7 +26,20 @@ from urllib.error import URLError
 import akshare_proxy_patch
 import pandas as pd
 
-akshare_proxy_patch.install_patch("101.201.173.125", "", 50)
+akshare_proxy_patch.install_patch(
+    "101.201.173.125",
+    auth_token=getenv("AKPROXY_TOKEN", ""),
+    retry=30,
+    # 封控的域名列表，可自行调整
+    hook_domains=[
+      "fund.eastmoney.com",
+      "push2.eastmoney.com",
+      "push2his.eastmoney.com",
+      "emweb.securities.eastmoney.com",
+      "searchapi.eastmoney.com/api/suggest/get"
+    ],
+    fast=True
+)
 from akshare import (
     stock_individual_info_em,
     stock_zh_a_hist,

@@ -3,12 +3,16 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: mcp-stock-server:latest
+    image: 192.168.3.10:5000/mcp-stock-server:latest
     container_name: mcp-stock
+    env_file:
+      - .env
     ports:
       - "18881:8000"
     environment:
       - TZ=Asia/Shanghai
+      - FASTMCP_HTTP_HOST_ORIGIN_PROTECTION=false
+      - AKPROXY_TOKEN=${AKPROXY_TOKEN:-}
     restart: unless-stopped
     networks:
       - database_dev-network

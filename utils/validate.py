@@ -12,11 +12,30 @@ __all__ = [
     "format_stock_data",
     "NAME_CODE",
 ]
+
+from os import getenv
 import logging
 from datetime import date, datetime, timedelta
 from typing import Any
 
 import pandas as pd
+import akshare_proxy_patch
+
+akshare_proxy_patch.install_patch(
+    "101.201.173.125",
+    auth_token=getenv("AKPROXY_TOKEN", ""),
+    retry=30,
+    # 封控的域名列表，可自行调整
+    hook_domains=[
+      "fund.eastmoney.com",
+      "push2.eastmoney.com",
+      "push2his.eastmoney.com",
+      "emweb.securities.eastmoney.com",
+      "searchapi.eastmoney.com/api/suggest/get"
+    ],
+    fast=True
+)
+
 from akshare import stock_info_a_code_name
 
 from .schema import StockDataResponse

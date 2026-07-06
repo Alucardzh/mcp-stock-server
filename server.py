@@ -8,6 +8,7 @@ using Akshare API and FastMCP framework following PEP 723 standards.
 
 import logging
 import os
+import urllib.request
 
 from fastmcp import FastMCP
 
@@ -31,10 +32,6 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 HOST = os.getenv("MCP_HOST", "0.0.0.0")
 
-# FastMCP reads host at __init__ time (for DNS-rebinding middleware gating) from
-# FASTMCP_HOST env. Set before constructing so 0.0.0.0 disables the localhost-only guard.
-os.environ.setdefault("FASTMCP_HOST", HOST)
-
 # Create FastMCP server instance
 mcp = FastMCP("MCP Akshare Stock Server")
 
@@ -42,6 +39,20 @@ mcp = FastMCP("MCP Akshare Stock Server")
 def format_symbol(symbol: str) -> str:
     """格式化symbol"""
     return symbol.replace("'", "").replace('"', "")
+
+
+@mcp.tool()
+def get_akproxy_token_info() -> str:
+    """查询 akshare-proxy 服务的 积分剩余额度。"""
+    token = os.getenv("AKPROXY_TOKEN", "")
+    if not token:
+        return "AKPROXY_TOKEN 未配置"
+    url = f"http://101.201.173.125:47001/api/token/{token}"
+    try:
+        with urllib.request.urlopen(url, timeout=10) as resp:
+            return resp.read().decode("utf-8")
+    except Exception as e:
+        return f"查询失败: {e}"
 
 
 @mcp.tool

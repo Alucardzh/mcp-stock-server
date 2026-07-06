@@ -7,11 +7,28 @@
 """
 
 __all__ = ["StockCal"]
-
+from os import getenv
 import json
 from datetime import datetime, timedelta
 
 import pandas as pd
+import akshare_proxy_patch
+
+
+akshare_proxy_patch.install_patch(
+    "101.201.173.125",
+    auth_token=getenv("AKPROXY_TOKEN", ""),
+    retry=30,
+    # 封控的域名列表，可自行调整
+    hook_domains=[
+      "fund.eastmoney.com",
+      "push2.eastmoney.com",
+      "push2his.eastmoney.com",
+      "emweb.securities.eastmoney.com",
+      "searchapi.eastmoney.com/api/suggest/get"
+    ],
+    fast=True
+)
 from akshare import stock_zh_a_hist, stock_zt_pool_em, tool_trade_date_hist_sina
 
 from .schema import StockCalLimit
