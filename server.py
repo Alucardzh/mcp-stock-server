@@ -29,7 +29,11 @@ logging.basicConfig(
     level=logging.WARNING, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
+HOST = os.getenv("MCP_HOST", "0.0.0.0")
 
+# FastMCP reads host at __init__ time (for DNS-rebinding middleware gating) from
+# FASTMCP_HOST env. Set before constructing so 0.0.0.0 disables the localhost-only guard.
+os.environ.setdefault("FASTMCP_HOST", HOST)
 
 # Create FastMCP server instance
 mcp = FastMCP("MCP Akshare Stock Server")
@@ -220,30 +224,9 @@ def limit_stock_analysis() -> str:
 
 def main():
     """Main entry point for the FastMCP server."""
-    # FastMCP handles stdout/stderr correctly for MCP protocol
-    # JSON-RPC messages go to stdout, logs go to stderr
     os.environ["PYTHONUNBUFFERED"] = "1"
-    logger.info("Starting MCP Akshare Server with FastMCP")
-
-    # 支持通过环境变量切换传输模式
-    # 默认: http (Streamable HTTP) - 稳定可靠，适合生产环境
-    transport = os.getenv("MCP_TRANSPORT", "http")
-    port = int(os.getenv("MCP_PORT", "8000"))
-    host = os.getenv("MCP_HOST", "0.0.0.0")
-
-    if transport == "http":
-        # 推荐: Streamable HTTP transport
-        logger.info("Running in HTTP mode on %s:%s", host, port)
-        mcp.run(transport="http", host=host, port=port)
-    elif transport == "sse":
-        # SSE transport (legacy, 仅用于兼容旧版本)
-        logger.warning("SSE transport is legacy, consider using HTTP transport instead")
-        logger.info("Running in SSE mode on %s:%s", host, port)
-        mcp.run(transport="sse", host=host, port=port)
-    else:
-        # stdio 模式 (用于本地进程通信)
-        logger.info("Running in stdio mode")
-        mcp.run()
+    logger.info("Starting MCP Akshare Server in HTTP mode on %s:8000", HOST)
+    mcp.run(transport="http", host=HOST, port=8000)
 
 
 if __name__ == "__main__":

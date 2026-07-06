@@ -20,8 +20,6 @@ RUN uv venv /root/.venv --clear && \
 # 设置环境变量
 ENV PATH="/root/.venv/bin:$PATH"
 ENV PYTHONUNBUFFERED=1
-ENV MCP_TRANSPORT=http
-ENV MCP_PORT=8000
 ENV UV_PROJECT_ENVIRONMENT=/root/.venv
 
 EXPOSE 8000
