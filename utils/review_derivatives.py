@@ -243,3 +243,217 @@ def get_index_derivatives(date: str = "") -> str:
     except Exception as e:  # noqa: BLE001
         logger.error("Error in get_index_derivatives: %s", e)
         return json_err(f"查询衍生品指标失败: {e}")
+
+
+_RANK_NAMES = [
+    "交易日", "合约系列", "rank",
+    "vol_party_name", "vol", "vol_chg",
+    "long_party_name", "long_open_interest", "long_open_interest_chg",
+    "short_party_name", "short_open_interest", "short_open_interest_chg",
+]
+
+
+def fetch_option_rank_csv(var: str, day: date_type) -> pd.DataFrame | None:
+    """中金所股指期权成交持仓排名 CSV（官网直连, GBK; 无数据返回 None）"""
+    url = RANK_URL.format(ym=day.strftime("%Y%m"), d=day.strftime("%d"), var=var)
+    try:
+        resp = requests.get(url, timeout=10)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("cffex option rank %s %s failed: %s", var, day, e)
+        return None
+    if resp.status_code != 200 or len(resp.content) < 60:
+        return None
+    try:
+        return pd.read_csv(
+            io.BytesIO(resp.content),
+            encoding="gbk",
+            header=None,
+            skiprows=2,
+            names=_RANK_NAMES,
+        )
+    except Exception as e:  # noqa: BLE001
+        logger.warning("parse cffex option rank csv failed: %s", e)
+        return None
+
+
+def option_rank_with_fallback(
+    var: str, day: date_type
+) -> tuple[pd.DataFrame | None, date_type]:
+    for d in [day, *prev_trading_days(day, 6)]:
+        df = fetch_option_rank_csv(var, d)
+        if df is not None and not df.empty:
+            return df, d
+    return None, day
+
+
+def _summarize_members(rank_df: pd.DataFrame) -> list[dict]:
+    """按会员聚合净持仓与净变化（跨合约求和；仅前20可见, 缺失方向按0计）"""
+    agg: dict[str, dict[str, float]] = {}
+    for _, r in rank_df.iterrows():
+        for side, party_col, oi_col, chg_col in (
+            ("long", "long_party_name", "long_open_interest", "long_open_interest_chg"),
+            ("short", "short_party_name", "short_open_interest", "short_open_interest_chg"),
+        ):
+            name = str(r.get(party_col, "")).strip()
+            if not name or name == "nan":
+                continue
+            oi = pd.to_numeric(r.get(oi_col), errors="coerce")
+            chg = pd.to_numeric(r.get(chg_col), errors="coerce")
+            slot = agg.setdefault(
+                name, {"long": 0.0, "short": 0.0, "long_chg": 0.0, "short_chg": 0.0}
+            )
+            if pd.notna(oi):
+                slot[side] += float(oi)
+            if pd.notna(chg):
+                slot[f"{side}_chg"] += float(chg)
+    rows = [
+        {
+            "member": name,
+            "net": int(s["long"] - s["short"]),
+            "net_chg": int(s["long_chg"] - s["short_chg"]),
+            "long_oi": int(s["long"]),
+            "short_oi": int(s["short"]),
+        }
+        for name, s in agg.items()
+    ]
+    rows.sort(key=lambda x: x["net_chg"], reverse=True)
+    return rows
+
+
+def _slim_rank_rows(df: pd.DataFrame, member: str = "") -> list[dict]:
+    """前20排名行瘦身（可按会员子串过滤）"""
+    rows = []
+    for _, r in df.head(20).iterrows():
+        if member and not any(
+            member in str(r.get(c, ""))
+            for c in ("vol_party_name", "long_party_name", "short_party_name")
+        ):
+            continue
+        rank = pd.to_numeric(r.get("rank"), errors="coerce")
+        rows.append(
+            {
+                "rank": int(rank) if pd.notna(rank) else None,
+                "vol_party": str(r.get("vol_party_name", "")),
+                "vol": safe_num(r.get("vol"), 0),
+                "vol_chg": safe_num(r.get("vol_chg"), 0),
+                "long_party": str(r.get("long_party_name", "")),
+                "long_oi": safe_num(r.get("long_open_interest"), 0),
+                "long_chg": safe_num(r.get("long_open_interest_chg"), 0),
+                "short_party": str(r.get("short_party_name", "")),
+                "short_oi": safe_num(r.get("short_open_interest"), 0),
+                "short_chg": safe_num(r.get("short_open_interest_chg"), 0),
+            }
+        )
+    return rows
+
+
+@RateLimiter(max_calls=10, time_window=60)
+def get_cffex_rank(var: str = "IF", date: str = "", member: str = "") -> str:
+    """查询中金所前20会员成交持仓排名（经纪席位口径, "(代客)"后缀）
+
+    Args:
+        var: IF/IH/IC/IM(股指期货) 或 IO/MO/HO(股指期权)，默认 IF
+        date: 查询日期 YYYY-MM-DD，默认今天；非交易日自动回退最近交易日
+        member: 会员名子串过滤（如 "中信"），默认不过滤
+    """
+    try:
+        day = parse_day(date)
+        if day is None:
+            return json_err(f"日期格式错误: {date}，请使用 YYYY-MM-DD")
+        v = (var or "").strip().upper()
+        if v not in RANK_VARS:
+            return json_err(f"var 仅支持 {'/'.join(sorted(RANK_VARS))}，当前: {var}")
+        notes = []
+        if v in INDEX_FUTURES:
+            df_map: dict = {}
+            actual_day = day
+            for d in [day, *prev_trading_days(day, 6)]:
+                try:
+                    df_map = get_cffex_rank_table(d.strftime("%Y%m%d"), vars_list=[v])
+                except Exception as e:  # noqa: BLE001
+                    logger.warning("get_cffex_rank_table(%s) failed: %s", d, e)
+                    continue
+                if isinstance(df_map, dict) and df_map:
+                    actual_day = d
+                    break
+            if not df_map:
+                return json_err(f"{day} 前后数个交易日无 {v} 席位数据")
+            if actual_day != day:
+                notes.append(f"{day} 无数据，返回最近交易日 {actual_day}")
+            contracts = {
+                sym: _slim_rank_rows(df, member) for sym, df in df_map.items()
+            }
+            summary = _summarize_members(
+                pd.concat(list(df_map.values()), ignore_index=True)
+            )
+        else:
+            df, actual_day = option_rank_with_fallback(v, day)
+            if df is None or df.empty:
+                return json_err(f"{day} 前后数个交易日无 {v} 期权席位数据")
+            if actual_day != day:
+                notes.append(f"{day} 无数据，返回最近交易日 {actual_day}")
+            contracts = {
+                str(sym): _slim_rank_rows(sub, member)
+                for sym, sub in df.groupby("合约系列")
+            }
+            summary = _summarize_members(df)
+        if member:
+            summary = [s for s in summary if member in s["member"]]
+        return json_ok(
+            {
+                "date": str(actual_day),
+                "variety": v,
+                "contracts": contracts,
+                "member_summary": summary[:20],
+                "notes": notes
+                + ["席位为经纪口径(代客)，仅前20会员可见，缺失方向按0计"],
+            }
+        )
+    except Exception as e:  # noqa: BLE001
+        logger.error("Error in get_cffex_rank: %s", e)
+        return json_err(f"查询席位排名失败: {e}")
+
+
+def derivatives_section(day: date_type) -> dict:
+    """⑤⑥聚合：基差 + PCR + 席位摘要(IF/IO 净持仓变化Top3)"""
+    out, notes = {}, []
+    try:
+        out["basis"] = basis_section(day)
+        notes += [f"[basis] {n}" for n in out["basis"].pop("notes", [])]
+    except Exception as e:  # noqa: BLE001
+        out["basis"] = None
+        notes.append(f"[basis] 失败: {e}")
+    try:
+        out["pcr"] = pcr_section(day)
+        notes += [f"[pcr] {n}" for n in out["pcr"].pop("notes", [])]
+    except Exception as e:  # noqa: BLE001
+        out["pcr"] = None
+        notes.append(f"[pcr] 失败: {e}")
+    seats: dict[str, dict | None] = {}
+    for v in ("IF", "IO"):
+        try:
+            if v == "IF":
+                df_map = get_cffex_rank_table(day.strftime("%Y%m%d"), vars_list=["IF"])
+                df = (
+                    pd.concat(list(df_map.values()), ignore_index=True)
+                    if df_map
+                    else None
+                )
+                actual = day
+            else:
+                df, actual = option_rank_with_fallback("IO", day)
+            if df is None or df.empty:
+                raise ValueError("无席位数据")
+            s = _summarize_members(df)
+            seats[v] = {
+                "date": str(actual),
+                "top_net_long_chg": s[:3],
+                "top_net_short_chg": list(reversed(s[-3:])),
+            }
+        except Exception as e:  # noqa: BLE001
+            seats[v] = None
+            notes.append(f"[seats:{v}] 失败: {e}")
+    out["seats"] = seats
+    if out["basis"] is None and out["pcr"] is None and not any(seats.values()):
+        raise ValueError("基差/PCR/席位均失败")
+    return {"date": str(day), **out, "notes": notes}

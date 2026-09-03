@@ -111,3 +111,115 @@ def test_get_index_derivatives(monkeypatch):
     monkeypatch.setattr(rd, "option_daily_stats_szse", lambda date: pd.DataFrame())
     out = rd.get_index_derivatives(date="2026-09-02")
     assert '"success": true' in out and '"basis"' in out and '"pcr"' in out
+
+
+def _rank_df():
+    return pd.DataFrame(
+        {
+            "rank": [1, 2],
+            "vol_party_name": ["中信期货(代客)", "国泰君安(代客)"],
+            "vol": [26865, 23501],
+            "vol_chg": [2688, 5715],
+            "long_party_name": ["国泰君安(代客)", "中信期货(代客)"],
+            "long_open_interest": [22066, 18937],
+            "long_open_interest_chg": [-789, 1432],
+            "short_party_name": ["中信期货(代客)", "华泰期货(代客)"],
+            "short_open_interest": [24419, 16152],
+            "short_open_interest_chg": [905, -574],
+            "symbol": ["IF2609", "IF2609"],
+            "variety": ["IF", "IF"],
+        }
+    )
+
+
+def test_summarize_members():
+    rows = rd._summarize_members(_rank_df())
+    by_name = {r["member"]: r for r in rows}
+    citic = by_name["中信期货(代客)"]
+    # 中信: 多18937(+1432) 空24419(+905) -> net -5482, net_chg +527
+    assert citic["net"] == 18937 - 24419
+    assert citic["net_chg"] == 1432 - 905
+    gtja = by_name["国泰君安(代客)"]
+    assert gtja["net"] == 22066 and gtja["net_chg"] == -789
+    # 排序不变量：按 net_chg 降序
+    chgs = [r["net_chg"] for r in rows]
+    assert chgs == sorted(chgs, reverse=True)
+
+
+class _FakeResp:
+    def __init__(self, content, status=200):
+        self.content = content
+        self.status_code = status
+
+
+_CSV_LINES = [
+    "交易日,合约系列,排名,成交量排名,,,持买单量排名,,,持卖单量排名,,",
+    ",,,会员简称,成交量,比上一交易日增减,会员简称,持买单量,比上一交易日增减,会员简称,持卖单量,比上一交易日增减",
+    "20260902,IO2609,1,中信期货(代客),26143,4357,中信期货(代客),14934,1298,中信期货(代客),15053,1733",
+    "20260902,IO2609,2,华泰期货(代客),21702,5211,国泰君安(代客),12084,272,国泰君安(代客),12452,131",
+]
+
+
+def test_fetch_option_rank_csv(monkeypatch):
+    monkeypatch.setattr(
+        rd.requests,
+        "get",
+        lambda url, timeout: _FakeResp("\n".join(_CSV_LINES).encode("gbk")),
+    )
+    df = rd.fetch_option_rank_csv("IO", date(2026, 9, 2))
+    assert df is not None and len(df) == 2
+    assert df.iloc[0]["vol_party_name"] == "中信期货(代客)"
+    assert int(df.iloc[0]["long_open_interest"]) == 14934
+    assert int(df.iloc[0]["short_open_interest"]) == 15053
+
+
+def test_fetch_option_rank_csv_404(monkeypatch):
+    monkeypatch.setattr(
+        rd.requests, "get", lambda url, timeout: _FakeResp(b"", status=404)
+    )
+    assert rd.fetch_option_rank_csv("IO", date(2026, 9, 2)) is None
+
+
+def test_get_cffex_rank_futures(monkeypatch):
+    monkeypatch.setattr(
+        rd,
+        "get_cffex_rank_table",
+        lambda date, vars_list: {"IF2609": _rank_df()},
+    )
+    out = rd.get_cffex_rank(var="IF", date="2026-09-02", member="中信")
+    assert '"success": true' in out and "IF2609" in out
+    data = __import__("json").loads(out)["data"]
+    assert any("中信" in s["member"] for s in data["member_summary"])
+
+
+def test_get_cffex_rank_option(monkeypatch):
+    monkeypatch.setattr(
+        rd.requests,
+        "get",
+        lambda url, timeout: _FakeResp("\n".join(_CSV_LINES).encode("gbk")),
+    )
+    out = rd.get_cffex_rank(var="IO", date="2026-09-02", member="")
+    assert '"success": true' in out
+    data = __import__("json").loads(out)["data"]
+    assert "IO2609" in data["contracts"]
+
+
+def test_get_cffex_rank_bad_var():
+    out = rd.get_cffex_rank(var="XX", date="2026-09-02")
+    assert '"success": false' in out
+
+
+def test_derivatives_section(monkeypatch):
+    monkeypatch.setattr(rd, "get_cffex_daily", lambda date: _cffex_df())
+    monkeypatch.setattr(rd, "stock_zh_index_daily", lambda symbol: _index_df())
+    monkeypatch.setattr(rd, "option_daily_stats_sse", lambda date: pd.DataFrame())
+    monkeypatch.setattr(rd, "option_daily_stats_szse", lambda date: pd.DataFrame())
+    monkeypatch.setattr(
+        rd, "get_cffex_rank_table", lambda date, vars_list: {"IF2609": _rank_df()}
+    )
+    monkeypatch.setattr(
+        rd.requests, "get", lambda url, timeout: _FakeResp(b"", status=404)
+    )
+    out = rd.derivatives_section(date(2026, 9, 2))
+    assert out["basis"] is not None and out["seats"]["IF"] is not None
+    assert out["seats"]["IO"] is None  # CSV 404 -> 降级
