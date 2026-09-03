@@ -118,3 +118,10 @@ ignore_missing_imports = true
 
 [tool.uv]
 index-url = "https://pypi.tuna.tsinghua.edu.cn/simple"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-m 'not live'"
+markers = [
+    "live: 真实接口冒烟测试（默认跳过，显式 -m live 运行）",
+]
