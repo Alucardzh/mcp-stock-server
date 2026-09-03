@@ -22,23 +22,27 @@
 | --- | --- | --- | --- |
 | 指数快照 | `stock_zh_index_spot_em` | 当日 | 东财（走 proxy，耗积分） |
 | 指数历史 | `index_zh_a_hist` | ✅ | 东财（走 proxy） |
-| 涨跌家数/活跃度 | `stock_market_activity_legu` | ❌ 仅当日 | 乐咕（直连） |
+| 涨跌家数/活跃度 | ~~`stock_market_activity_legu`~~ **已失效（2026-09-03 实测页面改版）**；改用 `stock_zh_a_spot_em` 全市场快照统计（仅当日） | ❌ 仅当日 | 东财（走 proxy） |
 | 涨停/强势/跌停/炸板/昨涨停池 | `stock_zt_pool_em` 等 5 个 | ✅ date 参数 | 东财（走 proxy） |
 | 大盘主力资金 | `stock_market_fund_flow` | ✅（历史序列，取目标日） | 东财（走 proxy） |
 | 板块主力资金 | `stock_sector_fund_flow_rank` | ❌ 仅 今日/5日/10日 | 东财（走 proxy） |
-| 两融 | `stock_margin_sse` / `stock_margin_szse` | ✅ 区间参数 | 交易所（直连） |
-| 期货日行情/主力合约 | `futures_zh_daily_sina` / `futures_display_main_sina` | ✅ / 当日 | 新浪（直连） |
+| 两融 | `stock_margin_sse` / `stock_margin_szse` | ✅ 区间参数 / 单日参数 | 交易所（直连） |
+| 期货日行情（含结算价/持仓量） | `ak.get_cffex_daily(date)`（单次返回全部品种全部合约，**基差首选**，2026-09-03 实测可用） | ✅ | 中金所官网（直连） |
+| 现货指数历史（基差用） | `stock_zh_index_daily`（新浪，sh000300 等） | ✅ | 新浪（直连） |
 | 期货席位排名 | `ak.get_cffex_rank_table(date, vars_list)` | ✅（自 20100416，每日 16:30 更新） | 中金所官网（直连） |
 | 期权席位排名 | 自写官网 CSV：`http://www.cffex.com.cn/sj/ccpm/YYYYMM/DD/{IO|MO|HO}_1.csv`（GBK） | ✅ | 中金所官网（直连） |
 | 期权日统计（量/持仓→PCR） | `option_daily_stats_sse` / `option_daily_stats_szse` | ✅ date 参数 | 交易所（直连） |
 | 中金所股指期权行情 | `option_cffex_hs300/zz1000/sz50_*_sina` | ✅ | 新浪（直连） |
 | 国家队 ETF | 现有 `etf.py`（`fund_etf_spot_em` 等） | ✅ | 东财（走 proxy） |
 
-关键事实：
+关键事实（2026-09-03 实测补充）：
 
 - `akshare-proxy-patch 0.5.0` 只 hook 东财四个域名（fund/push2/push2his/emweb.eastmoney.com），其余数据源直连、零积分。
+- `get_cffex_daily(date)` 返回当日全部品种全部合约（含 `settle` 结算价、`open_interest`、`volume`、`variety`），基差用它按品种选最大成交量合约为主力，不再依赖新浪连续合约（其实测 `settle` 恒为 0）。
+- 上交所/深交所期权日统计均支持 date 参数，且直接给出认购/认沽成交量与未平仓数（上交所还直接给"认沽/认购"比率），PCR 无需另算来源。
 - 中金所排名含 `中信期货(代客)` 等前 20 会员，经纪席位口径（该期货公司名下全部客户的合计，非自营）。
 - 北向资金自 2024-08-19 起交易所停止披露净买入与个股明细，仅剩成交总额，不纳入本设计。
+- 聚合一次的东财接口约 12 个（指数5 + 涨停池3 + 快照1 + 资金流2 + ETF快照1），高于最初 6-8 的估计，靠 10 分钟聚合缓存缓解。
 
 ## 3. 架构（方案 A：平铺模块 + 无状态实时拉取）
 
