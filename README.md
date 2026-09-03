@@ -158,6 +158,60 @@ cp env.template .env
 
 查询 akshare-proxy 服务的积分剩余额度（无需参数）。
 
+### `get_daily_review_tool`
+
+一键复盘：当日 A 股全貌（七模块并行聚合，单模块失败不影响整体）
+
+- **date**: 查询日期 YYYY-MM-DD，默认今天；历史日期时板块资金流、涨跌家数自动降级
+
+返回七段：`indices`（五大指数）、`breadth`（涨跌家数/涨停/跌停/炸板/连板梯队）、
+`fund_flow`（大盘+板块主力资金，东财口径）、`national_team`（国家队ETF份额变化与估算净申购）、
+`derivatives`（IF/IH/IC/IM 基差含年化、期权 PCR、IF/IO 席位摘要）、`margin`（两融余额，T-1）、
+以及 `notes`（降级说明）与 `errors`（模块级错误）。
+
+### `get_market_breadth_tool`
+
+市场涨跌结构（涨跌家数仅当日；涨停/跌停/炸板支持历史日期）
+
+- **date**: 查询日期 YYYY-MM-DD，默认今天
+
+### `get_zt_pool_tool`
+
+涨停生态股池明细（金额单位亿元；无数据自动回退最近交易日）
+
+- **pool**: 涨停/炸板/跌停/强势/昨涨停，默认"涨停"
+- **date**: 查询日期 YYYY-MM-DD，默认今天
+
+### `get_fund_flow_tool`
+
+主力资金（东财口径：超大单+大单净额）
+
+- **scope**: "全部"(大盘+板块) / "大盘" / "板块"，默认"全部"
+- **indicator**: "今日" / "5日" / "10日"（仅板块口径），默认"今日"
+- **date**: 查询日期 YYYY-MM-DD，默认今天
+
+### `get_margin_tool`
+
+两融余额（交易所 T-1 披露）
+
+- **market**: "沪深"(合计) / "沪" / "深"，默认"沪深"
+- **days**: 最近 N 个交易日序列(1-30)，默认 10
+- **date**: 截止日期 YYYY-MM-DD，默认今天
+
+### `get_cffex_rank_tool`
+
+中金所前 20 会员成交持仓排名（经纪席位口径，直连中金所官网零积分）
+
+- **var**: IF/IH/IC/IM（股指期货）或 IO/MO/HO（股指期权），默认 IF
+- **date**: 查询日期 YYYY-MM-DD，默认今天；非交易日自动回退
+- **member**: 会员名子串过滤（如 "中信"），默认不过滤
+
+### `get_index_derivatives_tool`
+
+股指衍生品指标：四大期指基差（含年化）+ 期权 PCR（分交易所）
+
+- **date**: 查询日期 YYYY-MM-DD，默认今天
+
 ## 使用示例
 
 ```python

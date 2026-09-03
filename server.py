@@ -16,13 +16,20 @@ from fastmcp import FastMCP
 from utils import (
     StockCal,
     calculate_support_resistance_func,
+    get_cffex_rank,
+    get_daily_review,
     get_etf_daily,
+    get_fund_flow,
+    get_index_derivatives,
+    get_margin,
+    get_market_breadth,
     get_market_index,
     get_stock_basic,
     get_stock_history,
     get_stock_realtime,
     get_stock_symbol_by_name,
     get_ths_hot_list,
+    get_zt_pool,
 )
 from utils.schema import StockCalLimit
 
@@ -197,6 +204,90 @@ def get_etf_daily_tool(symbols: str = "", date: str = "") -> str:
         - 单只查询时附带全市场规模与成交额排名（single_rank）
     """
     return get_etf_daily(symbols, date)
+
+
+@mcp.tool()
+def get_daily_review_tool(date: str = "") -> str:
+    """一键复盘：当日 A 股全貌（七模块并行聚合）
+
+    返回 indices(五大指数) / breadth(涨跌家数+涨停跌停炸板+连板梯队) /
+    fund_flow(大盘+板块主力资金) / national_team(国家队ETF份额与净申购) /
+    derivatives(期指基差+期权PCR+IF/IO席位摘要) / margin(两融余额T-1)。
+    单模块失败不影响整体（见 errors/notes）。
+
+    Args:
+        date: 查询日期 YYYY-MM-DD，默认今天。历史日期时板块资金流、涨跌家数自动降级。
+    """
+    return get_daily_review(date)
+
+
+@mcp.tool()
+def get_market_breadth_tool(date: str = "") -> str:
+    """查询市场涨跌结构：涨跌家数(仅当日)、涨停/跌停/炸板家数、连板梯队
+
+    Args:
+        date: 查询日期 YYYY-MM-DD，默认今天。历史日期时涨跌家数不可用(降级说明)。
+    """
+    return get_market_breadth(date)
+
+
+@mcp.tool()
+def get_zt_pool_tool(pool: str = "涨停", date: str = "") -> str:
+    """查询涨停生态股池明细（金额单位: 亿元）
+
+    Args:
+        pool: 涨停/炸板/跌停/强势/昨涨停，默认"涨停"
+        date: 查询日期 YYYY-MM-DD，默认今天；无数据时自动回退最近交易日
+    """
+    return get_zt_pool(pool, date)
+
+
+@mcp.tool()
+def get_fund_flow_tool(
+    scope: str = "全部", indicator: str = "今日", date: str = ""
+) -> str:
+    """查询主力资金：大盘（沪深两市净流入）与/或行业板块排名
+
+    Args:
+        scope: "全部"(大盘+板块) / "大盘" / "板块"，默认"全部"
+        indicator: "今日" / "5日" / "10日"（仅板块口径），默认"今日"
+        date: 查询日期 YYYY-MM-DD，默认今天
+    """
+    return get_fund_flow(scope, indicator, date)
+
+
+@mcp.tool()
+def get_margin_tool(market: str = "沪深", days: int = 10, date: str = "") -> str:
+    """查询两融（融资余额，T-1 披露）
+
+    Args:
+        market: "沪深"(合计) / "沪" / "深"，默认"沪深"
+        days: 返回最近 N 个交易日余额序列(1-30)，默认10
+        date: 截止日期 YYYY-MM-DD，默认今天
+    """
+    return get_margin(market, days, date)
+
+
+@mcp.tool()
+def get_cffex_rank_tool(var: str = "IF", date: str = "", member: str = "") -> str:
+    """查询中金所前20会员成交持仓排名（经纪席位口径）
+
+    Args:
+        var: IF/IH/IC/IM(股指期货) 或 IO/MO/HO(股指期权)，默认 IF
+        date: 查询日期 YYYY-MM-DD，默认今天；非交易日自动回退
+        member: 会员名子串过滤（如 "中信"），默认不过滤
+    """
+    return get_cffex_rank(var, date, member)
+
+
+@mcp.tool()
+def get_index_derivatives_tool(date: str = "") -> str:
+    """查询股指衍生品指标：四大期指基差（含年化）+ 期权PCR（分交易所）
+
+    Args:
+        date: 查询日期 YYYY-MM-DD，默认今天
+    """
+    return get_index_derivatives(date)
 
 
 @mcp.prompt()
