@@ -565,12 +565,13 @@ Expected: 新增用例 FAIL（`AttributeError: ... no attribute 'breadth_section
 `utils/review_market.py` 追加：
 
 ```python
+# 延迟绑定：lambda 在调用时从模块全局取函数，保证测试 monkeypatch 可生效
 POOL_FETCHERS = {
-    "涨停": stock_zt_pool_em,
-    "炸板": stock_zt_pool_zbgc_em,
-    "跌停": stock_zt_pool_dtgc_em,
-    "强势": stock_zt_pool_strong_em,
-    "昨涨停": stock_zt_pool_previous_em,
+    "涨停": lambda date: stock_zt_pool_em(date=date),
+    "炸板": lambda date: stock_zt_pool_zbgc_em(date=date),
+    "跌停": lambda date: stock_zt_pool_dtgc_em(date=date),
+    "强势": lambda date: stock_zt_pool_strong_em(date=date),
+    "昨涨停": lambda date: stock_zt_pool_previous_em(date=date),
 }
 
 MONEY_FIELDS = {"成交额", "封板资金", "封单资金", "板上成交额", "流通市值", "总市值"}
@@ -652,7 +653,8 @@ def breadth_section(day: date_type) -> dict:
             notes.append(f"全市场快照获取失败，涨跌家数缺失: {e}")
     else:
         notes.append("涨跌家数仅支持当日(全市场快照无历史)")
-    if out["limit_up"] is None and out["zhaban"] is None and out["limit_down"] is None:
+    # 空数据(None=拉取失败或 0 行)视为无数据：非交易日三大池应全空
+    if out["limit_up"] is None and not out["zhaban"] and not out["limit_down"]:
         raise ValueError(f"{day} 涨停/炸板/跌停池均无数据(可能非交易日)")
     return {**out, "notes": notes}
 
