@@ -50,3 +50,88 @@ def test_indices_section_all_missing(monkeypatch):
     monkeypatch.setattr(rm, "index_zh_a_hist", lambda symbol, **kw: _hist_df("2026-09-01"))
     with pytest.raises(ValueError):
         rm.indices_section(date(2026, 9, 2))
+
+
+def _zt_df():
+    return pd.DataFrame(
+        {
+            "代码": ["003005", "601086"],
+            "名称": ["竞业达", "国芳集团"],
+            "涨跌幅": [10.0, 10.0],
+            "最新价": [20.0, 11.1],
+            "成交额": [8.78e7, 6.44e7],
+            "换手率": [3.27, 0.87],
+            "封板资金": [1.8e8, 3.06e8],
+            "炸板次数": [0, 0],
+            "涨停统计": ["4/4", "4/4"],
+            "连板数": [4, 4],
+            "所属行业": ["IT服务Ⅱ", "一般零售"],
+        }
+    )
+
+
+def test_breadth_section_history(monkeypatch):
+    # 历史日期：三个池有数据、涨跌家数降级
+    monkeypatch.setattr(rm, "stock_zt_pool_em", lambda date: _zt_df())
+    monkeypatch.setattr(
+        rm, "stock_zt_pool_zbgc_em", lambda date: pd.DataFrame(columns=["代码"])
+    )
+    monkeypatch.setattr(
+        rm,
+        "stock_zt_pool_dtgc_em",
+        lambda date: pd.DataFrame({"代码": ["605179"], "连续跌停": [1]}),
+    )
+    out = rm.breadth_section(date(2026, 9, 2))
+    assert out["limit_up"] == 2 and out["max_lianban"] == 4
+    assert out["lianban_dist"] == {"4板": 2}
+    assert out["zhaban"] == 0 and out["limit_down"] == 1
+    assert out["up"] is None and out["down"] is None
+    assert any("仅支持当日" in n for n in out["notes"])
+
+
+def test_breadth_section_today(monkeypatch):
+    class FakeDT:
+        @staticmethod
+        def now():
+            class _T:
+                @staticmethod
+                def date():
+                    return date(2026, 9, 3)
+
+            return _T()
+
+    monkeypatch.setattr(rm, "datetime", FakeDT)
+    monkeypatch.setattr(rm, "stock_zt_pool_em", lambda date: _zt_df())
+    monkeypatch.setattr(
+        rm, "stock_zt_pool_zbgc_em", lambda date: pd.DataFrame(columns=["代码"])
+    )
+    monkeypatch.setattr(
+        rm, "stock_zt_pool_dtgc_em", lambda date: pd.DataFrame(columns=["代码"])
+    )
+    monkeypatch.setattr(
+        rm,
+        "stock_zh_a_spot_em",
+        lambda: pd.DataFrame({"代码": ["1", "2", "3"], "涨跌幅": [1.0, -2.0, 0.0]}),
+    )
+    out = rm.breadth_section(date(2026, 9, 3))
+    assert out["up"] == 1 and out["down"] == 1 and out["flat"] == 1
+
+
+def test_breadth_section_all_empty(monkeypatch):
+    empty = pd.DataFrame(columns=["代码"])
+    monkeypatch.setattr(rm, "stock_zt_pool_em", lambda date: empty)
+    monkeypatch.setattr(rm, "stock_zt_pool_zbgc_em", lambda date: empty)
+    monkeypatch.setattr(rm, "stock_zt_pool_dtgc_em", lambda date: empty)
+    with pytest.raises(ValueError):
+        rm.breadth_section(date(2026, 9, 2))
+
+
+def test_get_zt_pool(monkeypatch):
+    monkeypatch.setattr(rm, "stock_zt_pool_em", lambda date: _zt_df())
+    out = rm.get_zt_pool(pool="涨停", date="2026-09-02")
+    assert '"success": true' in out and "竞业达" in out
+
+
+def test_get_zt_pool_bad_pool():
+    out = rm.get_zt_pool(pool="飞天", date="2026-09-02")
+    assert '"success": false' in out
