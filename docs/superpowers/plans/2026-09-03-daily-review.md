@@ -930,8 +930,9 @@ INDICATORS = ("今日", "5日", "10日")
 
 
 def _pick(df: pd.DataFrame, r: pd.Series, keyword: str, ndigits: int = 2, div: float = 1.0):
-    """按子串取列并安全转数值，列缺失返回 None"""
-    c = col_like(df, keyword)
+    """取列并安全转数值：先精确匹配列名，再子串回退（"大单净流入-净额"是
+    "超大单净流入-净额"的子串，纯子串匹配会误绑定），列缺失返回 None"""
+    c = keyword if keyword in df.columns else col_like(df, keyword)
     if c is None:
         return None
     try:
