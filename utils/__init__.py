@@ -7,6 +7,7 @@
 """
 
 from .my_module import StockCal
+from .etf import get_etf_daily
 from .ths import get_ths_hot_list
 from .tools import (
     calculate_support_resistance_func,
@@ -19,6 +20,7 @@ from .tools import (
 
 __all__ = [
     "StockCal",
+    "get_etf_daily",
     "get_ths_hot_list",
     "get_stock_history",
     "get_stock_realtime",
