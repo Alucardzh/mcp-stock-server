@@ -433,13 +433,19 @@ def derivatives_section(day: date_type) -> dict:
     for v in ("IF", "IO"):
         try:
             if v == "IF":
-                df_map = get_cffex_rank_table(day.strftime("%Y%m%d"), vars_list=["IF"])
-                df = (
-                    pd.concat(list(df_map.values()), ignore_index=True)
-                    if df_map
-                    else None
-                )
-                actual = day
+                df, actual = None, day
+                for d in [day, *prev_trading_days(day, 6)]:
+                    try:
+                        df_map = get_cffex_rank_table(
+                            d.strftime("%Y%m%d"), vars_list=["IF"]
+                        )
+                    except Exception as e:  # noqa: BLE001
+                        logger.warning("get_cffex_rank_table(%s) failed: %s", d, e)
+                        continue
+                    if isinstance(df_map, dict) and df_map:
+                        df = pd.concat(list(df_map.values()), ignore_index=True)
+                        actual = d
+                        break
             else:
                 df, actual = option_rank_with_fallback("IO", day)
             if df is None or df.empty:

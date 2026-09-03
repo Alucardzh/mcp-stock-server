@@ -64,22 +64,25 @@ def indices_section(day: date_type) -> dict:
             df = index_zh_a_hist(
                 symbol=code, period="daily", start_date=start, end_date=end
             )
+            if df is None or df.empty or str(df["日期"].iloc[-1])[:10] != str(day):
+                notes.append(f"{name}({code}) 在 {day} 无数据(可能非交易日)")
+                continue
+            r = df.iloc[-1]
+            items.append(
+                {
+                    "code": code,
+                    "name": name,
+                    "close": safe_num(r["收盘"], 2),
+                    "chg_pct": safe_num(r["涨跌幅"], 2),
+                    "amount_yi": safe_num(float(r["成交额"]) / 1e8, 0),
+                }
+            )
+        except (TypeError, ValueError) as e:
+            notes.append(f"{name}({code}) 行情解析失败: {e}")
+            continue
         except Exception as e:  # noqa: BLE001
             notes.append(f"{name}({code}) 行情获取失败: {e}")
             continue
-        if df is None or df.empty or str(df["日期"].iloc[-1])[:10] != str(day):
-            notes.append(f"{name}({code}) 在 {day} 无数据(可能非交易日)")
-            continue
-        r = df.iloc[-1]
-        items.append(
-            {
-                "code": code,
-                "name": name,
-                "close": safe_num(r["收盘"], 2),
-                "chg_pct": safe_num(r["涨跌幅"], 2),
-                "amount_yi": safe_num(float(r["成交额"]) / 1e8, 0),
-            }
-        )
     if not items:
         raise ValueError(f"{day} 未获取到任何指数行情(可能非交易日)")
     return {"date": str(day), "items": items, "notes": notes}

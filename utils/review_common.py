@@ -20,8 +20,19 @@ def safe_num(value, ndigits: int = 2):
         return None
 
 
+def _sanitize(value):
+    """NaN/Infinity -> None（json.dumps 默认输出 NaN/Infinity 非法 JSON，严格解析器会拒绝）"""
+    if isinstance(value, float) and (value != value or value in (float("inf"), float("-inf"))):
+        return None
+    if isinstance(value, dict):
+        return {k: _sanitize(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_sanitize(v) for v in value]
+    return value
+
+
 def json_ok(data) -> str:
-    return json.dumps({"success": True, "data": data}, ensure_ascii=False, indent=2)
+    return json.dumps({"success": True, "data": _sanitize(data)}, ensure_ascii=False, indent=2)
 
 
 def json_err(msg: str) -> str:

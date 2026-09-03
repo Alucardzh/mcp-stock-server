@@ -214,8 +214,19 @@ def safe_num(value, ndigits: int = 2):
         return None
 
 
+def _sanitize(value):
+    """NaN/Infinity -> None（json.dumps 默认输出 NaN/Infinity 非法 JSON，严格解析器会拒绝）"""
+    if isinstance(value, float) and (value != value or value in (float("inf"), float("-inf"))):
+        return None
+    if isinstance(value, dict):
+        return {k: _sanitize(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_sanitize(v) for v in value]
+    return value
+
+
 def json_ok(data) -> str:
-    return json.dumps({"success": True, "data": data}, ensure_ascii=False, indent=2)
+    return json.dumps({"success": True, "data": _sanitize(data)}, ensure_ascii=False, indent=2)
 
 
 def json_err(msg: str) -> str:
@@ -420,22 +431,25 @@ def indices_section(day: date_type) -> dict:
             df = index_zh_a_hist(
                 symbol=code, period="daily", start_date=start, end_date=end
             )
+            if df is None or df.empty or str(df["日期"].iloc[-1])[:10] != str(day):
+                notes.append(f"{name}({code}) 在 {day} 无数据(可能非交易日)")
+                continue
+            r = df.iloc[-1]
+            items.append(
+                {
+                    "code": code,
+                    "name": name,
+                    "close": safe_num(r["收盘"], 2),
+                    "chg_pct": safe_num(r["涨跌幅"], 2),
+                    "amount_yi": safe_num(float(r["成交额"]) / 1e8, 0),
+                }
+            )
+        except (TypeError, ValueError) as e:
+            notes.append(f"{name}({code}) 行情解析失败: {e}")
+            continue
         except Exception as e:  # noqa: BLE001
             notes.append(f"{name}({code}) 行情获取失败: {e}")
             continue
-        if df is None or df.empty or str(df["日期"].iloc[-1])[:10] != str(day):
-            notes.append(f"{name}({code}) 在 {day} 无数据(可能非交易日)")
-            continue
-        r = df.iloc[-1]
-        items.append(
-            {
-                "code": code,
-                "name": name,
-                "close": safe_num(r["收盘"], 2),
-                "chg_pct": safe_num(r["涨跌幅"], 2),
-                "amount_yi": safe_num(float(r["成交额"]) / 1e8, 0),
-            }
-        )
     if not items:
         raise ValueError(f"{day} 未获取到任何指数行情(可能非交易日)")
     return {"date": str(day), "items": items, "notes": notes}
@@ -1874,13 +1888,19 @@ def derivatives_section(day: date_type) -> dict:
     for v in ("IF", "IO"):
         try:
             if v == "IF":
-                df_map = get_cffex_rank_table(day.strftime("%Y%m%d"), vars_list=["IF"])
-                df = (
-                    pd.concat(list(df_map.values()), ignore_index=True)
-                    if df_map
-                    else None
-                )
-                actual = day
+                df, actual = None, day
+                for d in [day, *prev_trading_days(day, 6)]:
+                    try:
+                        df_map = get_cffex_rank_table(
+                            d.strftime("%Y%m%d"), vars_list=["IF"]
+                        )
+                    except Exception as e:  # noqa: BLE001
+                        logger.warning("get_cffex_rank_table(%s) failed: %s", d, e)
+                        continue
+                    if isinstance(df_map, dict) and df_map:
+                        df = pd.concat(list(df_map.values()), ignore_index=True)
+                        actual = d
+                        break
             else:
                 df, actual = option_rank_with_fallback("IO", day)
             if df is None or df.empty:

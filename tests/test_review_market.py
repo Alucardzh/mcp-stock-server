@@ -52,6 +52,21 @@ def test_indices_section_all_missing(monkeypatch):
         rm.indices_section(date(2026, 9, 2))
 
 
+def test_indices_section_bad_cell_degrades(monkeypatch):
+    """单指数坏值(成交额 None)降级为 note，不杀整个 section"""
+    good = _hist_df()
+    bad = _hist_df().copy()
+    bad["成交额"] = [None]
+
+    def fake(symbol, **kw):
+        return bad if symbol == "899050" else good
+
+    monkeypatch.setattr(rm, "index_zh_a_hist", fake)
+    out = rm.indices_section(date(2026, 9, 2))
+    assert len(out["items"]) == 4
+    assert any("899050" in n for n in out["notes"])
+
+
 def _zt_df():
     return pd.DataFrame(
         {

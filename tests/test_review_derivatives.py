@@ -223,3 +223,26 @@ def test_derivatives_section(monkeypatch):
     out = rd.derivatives_section(date(2026, 9, 2))
     assert out["basis"] is not None and out["seats"]["IF"] is not None
     assert out["seats"]["IO"] is None  # CSV 404 -> 降级
+
+
+def test_derivatives_section_if_walkback(monkeypatch):
+    """非交易日查询 IF 席位时回退最近交易日"""
+    calls = []
+
+    def fake_rank_table(date, vars_list):
+        calls.append(date)
+        return {} if date == "20260902" else {"IF2609": _rank_df()}
+
+    monkeypatch.setattr(rd, "get_cffex_rank_table", fake_rank_table)
+    monkeypatch.setattr(
+        rd.requests, "get", lambda url, timeout: _FakeResp(b"", status=404)
+    )
+    # 全量 mock basis/pcr 数据源，保证测试封闭（不发出任何真实网络请求）
+    monkeypatch.setattr(rd, "get_cffex_daily", lambda date: (_ for _ in ()).throw(ValueError("no data")))
+    monkeypatch.setattr(rd, "option_daily_stats_sse", lambda date: pd.DataFrame())
+    monkeypatch.setattr(rd, "option_daily_stats_szse", lambda date: pd.DataFrame())
+    monkeypatch.setattr(rd, "stock_zh_index_daily", lambda symbol: pd.DataFrame())
+    out = rd.derivatives_section(date(2026, 9, 2))
+    assert out["seats"]["IF"] is not None
+    assert out["seats"]["IF"]["date"] != "2026-09-02"
+    assert calls[0] == "20260902" and len(calls) >= 2

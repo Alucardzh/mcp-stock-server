@@ -1,5 +1,7 @@
 from datetime import date
 
+import json
+
 import pandas as pd
 
 from utils import review_common as rc
@@ -18,6 +20,14 @@ def test_json_envelope():
     assert '"success": true' in ok and '"a": 1' in ok
     err = rc.json_err("boom")
     assert '"success": false' in err and "boom" in err
+
+
+def test_json_ok_sanitizes_nan_inf():
+    out = rc.json_ok({"a": float("nan"), "b": [1.0, float("inf")], "c": {"d": float("-inf")}})
+    assert "NaN" not in out and "Infinity" not in out
+    assert '"a": null' in out and '"d": null' in out
+    # indent=2 下列表多行展开，改用解析校验（更严格：同时证明输出是合法 JSON）
+    assert json.loads(out)["data"]["b"] == [1.0, None]
 
 
 def test_parse_day():
