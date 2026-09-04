@@ -76,7 +76,7 @@ tests/                    # 全 mock + live 冒烟（默认跳过）
 - 返回 `{"success", "data": {as_of, <组名>..., notes, errors}}`；每组内单字段失败→该字段 `{close: null, error: "..."}` 不阻塞组；组级失败→`null` + errors
 - 组内容（口径）：
   - 美股：indexes[{name, close, chg_pct}]×4（纳指/标普/道指/费半）+ note（"9/3收盘"）
-  - 美债：us10y/us10y_chg_bp/us30y/us30y_chg_bp（bp=日差×100，源为收益率%）
+  - 美债：us10y/us10y_chg_bp/us30y/us30y_chg_bp（bp=日差×100，源为收益率%）+ japan10y/japan10y_chg_bp/japan20y/japan30y（MOF 源，长端顺带返回）
   - 汇率：dxy/dxy_chg_pct（东财）+ usdcnh/usdcnh_chg_pct（Yahoo；降级时在岸近似并加 note）
   - 亚太：日经/KOSPI（东财）+ 恒生科技（腾讯）+ note（盘中或收盘）
   - 商品：brent/wti/gold 各 {price, chg_pct}
