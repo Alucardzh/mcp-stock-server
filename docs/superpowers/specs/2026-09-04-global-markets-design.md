@@ -82,7 +82,7 @@ tests/                    # 全 mock + live 冒烟（默认跳过）
   - 商品：brent/wti/gold 各 {price, chg_pct}
   - 恐慌：vix/vix_chg_pct
 - 结果缓存 300 秒；单源缓存 60 秒
-- as_of = 数据实际时间戳（取各组最新的行情时间，ISO8601+08:00）
+- as_of = 响应生成时刻（ISO8601 带 +08:00 时区）；各组数据的实际时点在该组 note 中标注（如"隔夜收盘"/"盘中快照"/数据日期）
 
 ### 4.2 `get_stock_global_snapshot(symbols: str = "", preset: str = "ai_chain") -> str`
 
