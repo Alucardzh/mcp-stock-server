@@ -88,3 +88,71 @@ def test_fetch_yahoo_quote_http_fail(monkeypatch):
     )
     monkeypatch.setattr(gc, "cr_requests", fake)
     assert gc.fetch_yahoo_quote("NVDA") is None
+
+
+from datetime import date
+
+MOF_TEXT = "\n".join(
+    [
+        "Interest Rate (September 2026),,,,,,,,,,,,,,,(Unit : %)",
+        "Date,1Y,2Y,3Y,4Y,5Y,6Y,7Y,8Y,9Y,10Y,15Y,20Y,25Y,30Y,40Y",
+        "2026/9/2,1.56,1.854,2.009,2.199,2.332,2.45,2.585,2.743,2.874,3.006,3.554,3.864,4.141,4.122,4.134",
+        "2026/9/3,1.563,1.85,1.994,2.14,2.28,2.411,2.559,2.718,2.848,2.987,3.544,3.859,4.143,4.131,4.145",
+        "※If you cannot download the latest csv data, please clear the browser's cache and download again.,",
+    ]
+)
+
+
+def test_parse_jgb_csv():
+    df = gc._parse_jgb_csv(MOF_TEXT)
+    assert len(df) == 2  # 注释行/表头行被过滤
+    assert str(df["date"].iloc[-1]) == "2026-09-03"
+    assert df["10Y"].iloc[-1] == 2.987
+    assert df["40Y"].iloc[-1] == 4.145
+
+
+def test_fetch_jgb_yields_direct(monkeypatch, tmp_path):
+    monkeypatch.setattr(gc, "MOF_CACHE_DIR", tmp_path / "global")
+    monkeypatch.setattr(gc, "_mof_get_text", lambda url, use_proxy=False: MOF_TEXT)
+    gc._monthly_cache = None
+    out = gc.fetch_jgb_yields()
+    assert out["date"] == "2026-09-03"
+    assert out["japan10y"] == 2.987
+    assert out["japan10y_chg_bp"] == round((2.987 - 3.006) * 100, 1)
+    assert out["japan20y"] == 3.859 and out["japan30y"] == 4.131
+
+
+def test_fetch_jgb_yields_fallback_local(monkeypatch, tmp_path):
+    d = tmp_path / "global"
+    d.mkdir()
+    (d / "jgbcme_all.csv").write_text(MOF_TEXT, encoding="cp932")
+    monkeypatch.setattr(gc, "MOF_CACHE_DIR", d)
+    monkeypatch.setattr(gc, "_mof_get_text", lambda url, use_proxy=False: None)
+    gc._monthly_cache = None
+    out = gc.fetch_jgb_yields()
+    assert out["japan10y"] == 2.987
+    assert any("本地缓存" in n for n in out["notes"])
+
+
+def test_fetch_jgb_yields_all_fail(monkeypatch, tmp_path):
+    monkeypatch.setattr(gc, "MOF_CACHE_DIR", tmp_path / "empty")
+    monkeypatch.setattr(gc, "_mof_get_text", lambda url, use_proxy=False: None)
+    monkeypatch.setattr(gc, "_load_jgb_local", lambda: None)
+    gc._monthly_cache = None
+    try:
+        gc.fetch_jgb_yields()
+        assert False
+    except ValueError:
+        pass
+
+
+def test_jgb_yield_on_from_local_history(monkeypatch, tmp_path):
+    d = tmp_path / "global"
+    d.mkdir()
+    (d / "jgbcme_all.csv").write_text(MOF_TEXT, encoding="cp932")
+    monkeypatch.setattr(gc, "MOF_CACHE_DIR", d)
+    monkeypatch.setattr(gc, "_mof_get_text", lambda url, use_proxy=False: None)
+    gc._monthly_cache = None
+    out = gc.jgb_yield_on(date(2026, 9, 2))
+    assert out == {"date": "2026-09-02", "y10": 3.006, "y20": 3.864, "y30": 4.122}
+    assert gc.jgb_yield_on(date(2026, 8, 31)) is None
