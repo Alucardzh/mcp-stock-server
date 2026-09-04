@@ -178,10 +178,12 @@ def _load_jgb_local() -> pd.DataFrame | None:
         if text is None:
             return None
         df = _parse_jgb_csv(text)
+        if df is None or df.empty:
+            return None  # 非 CSV 内容(如代理错误页)不落盘, 避免永久污染本地缓存
         try:
             MOF_CACHE_DIR.mkdir(parents=True, exist_ok=True)
-            p.write_text(text, encoding="cp932")
-        except OSError as e:  # noqa: BLE001 磁盘问题不阻断返回
+            p.write_text(text, encoding="cp932", errors="replace")
+        except (OSError, UnicodeEncodeError) as e:  # noqa: BLE001 磁盘/编码问题不阻断返回
             logger.warning("MOF cache write failed: %s", e)
         return df
     try:

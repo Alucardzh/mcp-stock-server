@@ -156,3 +156,14 @@ def test_jgb_yield_on_from_local_history(monkeypatch, tmp_path):
     out = gc.jgb_yield_on(date(2026, 9, 2))
     assert out == {"date": "2026-09-02", "y10": 3.006, "y20": 3.864, "y30": 4.122}
     assert gc.jgb_yield_on(date(2026, 8, 31)) is None
+
+
+def test_load_jgb_local_rejects_non_csv(monkeypatch, tmp_path):
+    """非 CSV 的 200 响应(如代理错误页)不得落盘污染本地缓存"""
+    monkeypatch.setattr(gc, "MOF_CACHE_DIR", tmp_path / "global")
+    monkeypatch.setattr(
+        gc, "_mof_get_text",
+        lambda url, use_proxy=False: "<html>gateway error page 502</html>\n" * 10,
+    )
+    assert gc._load_jgb_local() is None
+    assert not (tmp_path / "global" / "jgbcme_all.csv").exists()
