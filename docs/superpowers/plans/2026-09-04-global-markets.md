@@ -1303,7 +1303,8 @@ def test_get_global_markets_all(monkeypatch):
     }
     d = out["data"]
     assert d["美股"]["marker"] == "us_equities_section"
-    assert "T+" in d["as_of"] or "+08:00" in d["as_of"]
+    from datetime import datetime as _dt
+    assert _dt.fromisoformat(d["as_of"]).utcoffset() is not None  # 带时区的ISO8601
 
 
 def test_get_global_markets_groups_filter(monkeypatch):
