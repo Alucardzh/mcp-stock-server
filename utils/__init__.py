@@ -24,6 +24,7 @@ from .review_market import get_market_breadth, get_zt_pool
 from .global_rates import get_fed_watch
 from .global_markets import get_global_markets
 from .global_stocks import get_stock_global_snapshot
+from .global_linkage import get_global_linkage_review
 
 __all__ = [
     "StockCal",
@@ -45,4 +46,5 @@ __all__ = [
     "get_fed_watch",
     "get_global_markets",
     "get_stock_global_snapshot",
+    "get_global_linkage_review",
 ]
