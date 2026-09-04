@@ -61,3 +61,16 @@ def test_get_global_linkage_review(monkeypatch):
 def test_get_global_linkage_review_bad_date():
     out = json.loads(gl.get_global_linkage_review("2026/09/03"))
     assert out["success"] is False
+
+
+def test_get_global_linkage_review_japan_leg_isolated(monkeypatch):
+    _patch(monkeypatch)
+
+    def boom(day):
+        raise ValueError("mof down")
+
+    monkeypatch.setattr(gl, "jgb_yield_on", boom)
+    out = json.loads(gl.get_global_linkage_review("2026-09-03"))
+    assert out["success"] is True
+    assert out["data"]["overnight"]["japan10y"] is None
+    assert any("[japan]" in n for n in out["data"]["notes"])
