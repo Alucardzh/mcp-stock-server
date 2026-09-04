@@ -297,6 +297,10 @@ def get_global_markets(groups: str = "全部") -> str:
                 logger.warning("group %s failed: %s", name, e)
                 return name, None, [], str(e)
 
+        # 预热组间共享缓存: 东财全球指数为唯一积分调用, 并行冷启动竞态会打2次
+        _tencent_batch()
+        _em_global_indexes()
+
         with ThreadPoolExecutor(max_workers=6) as pool:
             results = list(pool.map(lambda nf: run(nf[0], nf[1]), jobs))
         data = {

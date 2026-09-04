@@ -197,3 +197,28 @@ def test_get_global_markets_bad_group():
     import json
     out = json.loads(gm.get_global_markets("月球"))
     assert out["success"] is False
+
+
+def test_aggregator_prewarms_shared_caches(monkeypatch):
+    """聚合器预热共享缓存: 东财全球指数每次聚合只调用一次"""
+    gm._result_cache = {}
+    gm._tencent_cache = None
+    gm._em_global_cache = None
+    calls = {"em": 0}
+
+    def fake_em():
+        calls["em"] += 1
+        return pd.DataFrame(
+            {"代码": ["KS11"], "名称": ["韩国KOSPI"], "最新价": [6709.87], "涨跌幅": [-1.16]}
+        )
+
+    monkeypatch.setattr(gm, "index_global_spot_em", fake_em)
+    monkeypatch.setattr(
+        gm, "fetch_tencent_quotes",
+        lambda codes: {c: {"name": "x", "price": 1.0, "prev_close": 1.0, "chg_pct": 0.0} for c in codes},
+    )
+    monkeypatch.setattr(gm, "index_us_stock_sina", lambda symbol: _sina_sox())
+    import json as _json
+    out = _json.loads(gm.get_global_markets("亚太"))
+    assert out["success"] is True
+    assert calls["em"] == 1

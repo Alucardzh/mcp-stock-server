@@ -233,21 +233,8 @@ def fetch_jgb_yields() -> dict:
     return out
 
 
-def jgb_yield_on(day: date_type) -> dict | None:
-    """指定日期的日债 10Y/20Y/30Y：当月走月文件，更早走本地全历史"""
-    df = _monthly_df()
-    if df is not None and not df.empty:
-        hit = df[df["date"] == day]
-        if not hit.empty:
-            r = hit.iloc[-1]
-            return {
-                "date": str(day), "y10": safe_num(r["10Y"], 3),
-                "y20": safe_num(r["20Y"], 3), "y30": safe_num(r["30Y"], 3),
-            }
-    local = _load_jgb_local()
-    if local is None or local.empty:
-        return None
-    hit = local[local["date"] == day]
+def _jgb_row(df: pd.DataFrame, day: date_type) -> dict | None:
+    hit = df[df["date"] == day]
     if hit.empty:
         return None
     r = hit.iloc[-1]
@@ -255,3 +242,40 @@ def jgb_yield_on(day: date_type) -> dict | None:
         "date": str(day), "y10": safe_num(r["10Y"], 3),
         "y20": safe_num(r["20Y"], 3), "y30": safe_num(r["30Y"], 3),
     }
+
+
+def _refresh_jgb_local() -> pd.DataFrame | None:
+    """重新下载全历史并覆写本地缓存（月边界回看时本地可能落后于线上）"""
+    text = _mof_get_text(MOF_ALL_URL) or _mof_get_text(MOF_ALL_URL, use_proxy=True)
+    if not text:
+        return None
+    df = _parse_jgb_csv(text)
+    if df is None or df.empty:
+        return None
+    try:
+        MOF_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        (MOF_CACHE_DIR / "jgbcme_all.csv").write_text(text, encoding="cp932", errors="replace")
+    except (OSError, UnicodeEncodeError) as e:  # noqa: BLE001
+        logger.warning("MOF cache refresh failed: %s", e)
+    return df
+
+
+def jgb_yield_on(day: date_type) -> dict | None:
+    """指定日期的日债 10Y/20Y/30Y：当月走月文件，更早走本地全历史；
+    本地落后于目标日(如月初回看上月末)时一次性刷新全历史后重试"""
+    df = _monthly_df()
+    if df is not None and not df.empty:
+        row = _jgb_row(df, day)
+        if row:
+            return row
+    local = _load_jgb_local()
+    if local is None or local.empty:
+        return None
+    row = _jgb_row(local, day)
+    if row:
+        return row
+    if day > local["date"].max():
+        refreshed = _refresh_jgb_local()
+        if refreshed is not None:
+            return _jgb_row(refreshed, day)
+    return None

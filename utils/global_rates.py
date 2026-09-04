@@ -21,6 +21,11 @@ logger = logging.getLogger(__name__)
 _us_treasury_cache: CachedData | None = None
 
 
+def _col(df: pd.DataFrame, keyword: str) -> str | None:
+    """精确列名优先, 再子串回退（"…10年"是"…10年-2年"的前缀, 纯子串会误绑定）"""
+    return keyword if keyword in df.columns else col_like(df, keyword)
+
+
 def _us_rows() -> pd.DataFrame:
     """美债收益率全序列（缓存 3600s；akshare 内部 tqdm 进度条写 stderr，需静默）"""
     global _us_treasury_cache
@@ -50,7 +55,7 @@ def us_treasury_section(day=None) -> dict:
     prev = df.loc[idx - 1] if idx > df.index[0] else None
 
     def _get(row, keyword):
-        c = col_like(df, keyword)
+        c = _col(df, keyword)
         try:
             return float(row[c]) if c else None
         except (TypeError, ValueError):
@@ -84,7 +89,7 @@ def get_fed_watch() -> str:
         last = df.iloc[-1]
         first = df.index[0]
         week_ago = df.loc[max(df.index[-1] - 5, first)]
-        c2 = col_like(df, "美国国债收益率2年")
+        c2 = _col(df, "美国国债收益率2年")
 
         def _v(row):
             try:

@@ -15,7 +15,7 @@ def _tencent_body():
 def test_yahoo_proxy(monkeypatch):
     monkeypatch.setenv("YAHOO_PROXY", "http://p:7890")
     assert gc.yahoo_proxy() == {"http": "http://p:7890", "https": "http://p:7890"}
-    monkeypatch.delenv("YAHOO_PROXY")
+    monkeypatch.delenv("YAHOO_PROXY", raising=False)
     assert gc.yahoo_proxy() is None
 
 
@@ -167,3 +167,28 @@ def test_load_jgb_local_rejects_non_csv(monkeypatch, tmp_path):
     )
     assert gc._load_jgb_local() is None
     assert not (tmp_path / "global" / "jgbcme_all.csv").exists()
+
+
+def test_jgb_yield_on_refreshes_stale_local(monkeypatch, tmp_path):
+    """本地全历史落后于目标日(月边界)时, 一次性刷新后重试"""
+    d = tmp_path / "global"
+    d.mkdir()
+    stale = "\n".join(
+        [
+            "Date,1Y,2Y,3Y,4Y,5Y,6Y,7Y,8Y,9Y,10Y,15Y,20Y,25Y,30Y,40Y",
+            "2026/8/31,1.5,1.7,1.9,2.0,2.1,2.2,2.3,2.4,2.5,2.9,3.5,3.8,4.1,4.09,4.09",
+        ]
+    )
+    (d / "jgbcme_all.csv").write_text(stale, encoding="cp932")
+    monkeypatch.setattr(gc, "MOF_CACHE_DIR", d)
+    monkeypatch.setattr(
+        gc, "_mof_get_text",
+        lambda url, use_proxy=False: None if "jgbcme.csv" in url else MOF_TEXT,
+    )
+    gc._monthly_cache = None
+    out = gc.jgb_yield_on(date(2026, 9, 2))  # 9/2 在冻结文件之后、当月文件不可用
+    assert out == {"date": "2026-09-02", "y10": 3.006, "y20": 3.864, "y30": 4.122}
+    # 本地缓存已被刷新覆盖
+    assert "2026/9/3" in (d / "jgbcme_all.csv").read_text(encoding="cp932")
+    # 早于本地最后日期且不存在的日期仍返回 None(不触发刷新)
+    assert gc.jgb_yield_on(date(2026, 8, 15)) is None

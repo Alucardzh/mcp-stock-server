@@ -58,3 +58,14 @@ def test_get_fed_watch(monkeypatch):
     assert d["spread_10y_2y"] == 0.43
     # 仅3行数据: 周变动回退到首行 (4.34-4.30)*100
     assert d["us2y_chg_1w_bp"] == round((4.34 - 4.30) * 100, 1)
+
+
+def test_us_treasury_exact_column_priority(monkeypatch):
+    """利差列排在10年列之前时, 精确匹配优先防止读错列"""
+    gr._us_treasury_cache = None
+    base = _rate_df()
+    cols = ["日期", "美国国债收益率10年-2年", "美国国债收益率2年", "美国国债收益率10年", "美国国债收益率30年"]
+    monkeypatch.setattr(gr, "bond_zh_us_rate", lambda: base[cols])
+    out = gr.us_treasury_section()
+    assert out["us10y"] == 4.77
+    assert out["spread_10y_2y"] == 0.43

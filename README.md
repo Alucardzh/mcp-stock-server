@@ -89,7 +89,7 @@ cp env.template .env
 | --- | --- | --- | --- |
 | `AKPROXY_TOKEN` | ✅ | akshare-proxy 服务的鉴权 Token，用于通过 `akshare-proxy-patch` 访问行情数据。在 [akshare-proxy](http://101.201.173.125:47001) 获取 | |
 | `MCP_HOST` | ❌ | HTTP 服务监听地址，默认 `0.0.0.0` | |
-| `YAHOO_PROXY` | ❌ | 海外行情代理（Yahoo个股/离岸汇率/日债fallback），空=禁用自动降级 | `http://192.168.3.10:7890` |
+| `YAHOO_PROXY` | ❌ | 海外行情代理（Yahoo个股/离岸汇率/日债fallback），空=禁用 Yahoo 路径，自动降级国内源 | `http://192.168.3.10:7890` |
 
 > ⚠️ `.env` 已在 `.gitignore` 中忽略，请勿提交真实 Token。
 
