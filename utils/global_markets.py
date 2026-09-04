@@ -52,11 +52,13 @@ def _em_global_indexes() -> pd.DataFrame | None:
     return df
 
 
-def _em_index(kw: str, name: str) -> dict | None:
+def _em_index(code: str, name: str) -> dict | None:
+    """东财全球指数：按稳定代码精确匹配（响应同时含 KOSPI200 与 KS11 等，
+    名称子串匹配会选错行且响应按涨跌幅排序不可依赖）"""
     df = _em_global_indexes()
     if df is None:
         return None
-    hit = df[df["名称"].astype(str).str.contains(kw, na=False)]
+    hit = df[df["代码"].astype(str) == code]
     if hit.empty:
         return None
     r = hit.iloc[0]
@@ -138,7 +140,7 @@ def us_equities_section() -> dict:
 def fx_section() -> dict:
     """汇率组：DXY(东财) + USDCNH(Yahoo; 降级在岸USD/CNY近似)"""
     notes = []
-    dxy = _em_index("美元指数", "美元指数")
+    dxy = _em_index("UDI", "美元指数")
     y = fetch_yahoo_quote("USDCNH=X")
     usdcnh = chg = None
     if y and y.get("close") is not None:
@@ -165,8 +167,8 @@ def asia_section() -> dict:
     """亚太组：日经/KOSPI(东财) + 恒生科技(腾讯)"""
     batch = _tencent_batch()
     indexes, notes = [], []
-    for kw, name, ysym in (("日经", "日经225", "^N225"), ("KOSPI", "KOSPI", "^KS11")):
-        item = _em_index(kw, name)
+    for code, name, ysym in (("N225", "日经225", "^N225"), ("KS11", "KOSPI", "^KS11")):
+        item = _em_index(code, name)
         if item is None:
             y = fetch_yahoo_quote(ysym)
             if y and y.get("close") is not None:
