@@ -21,6 +21,7 @@ from .review import get_daily_review
 from .review_derivatives import get_cffex_rank, get_index_derivatives
 from .review_funds import get_fund_flow, get_margin
 from .review_market import get_market_breadth, get_zt_pool
+from .global_rates import get_fed_watch
 
 __all__ = [
     "StockCal",
@@ -39,4 +40,5 @@ __all__ = [
     "get_margin",
     "get_cffex_rank",
     "get_index_derivatives",
+    "get_fed_watch",
 ]
