@@ -85,10 +85,11 @@ docker-compose up -d
 cp env.template .env
 ```
 
-| 变量名 | 必填 | 说明 |
-| --- | --- | --- |
-| `AKPROXY_TOKEN` | ✅ | akshare-proxy 服务的鉴权 Token，用于通过 `akshare-proxy-patch` 访问行情数据。在 [akshare-proxy](http://101.201.173.125:47001) 获取 |
-| `MCP_HOST` | ❌ | HTTP 服务监听地址，默认 `0.0.0.0` |
+| 变量名 | 必填 | 说明 | 示例 |
+| --- | --- | --- | --- |
+| `AKPROXY_TOKEN` | ✅ | akshare-proxy 服务的鉴权 Token，用于通过 `akshare-proxy-patch` 访问行情数据。在 [akshare-proxy](http://101.201.173.125:47001) 获取 | |
+| `MCP_HOST` | ❌ | HTTP 服务监听地址，默认 `0.0.0.0` | |
+| `YAHOO_PROXY` | ❌ | 海外行情代理（Yahoo个股/离岸汇率/日债fallback），空=禁用自动降级 | `http://192.168.3.10:7890` |
 
 > ⚠️ `.env` 已在 `.gitignore` 中忽略，请勿提交真实 Token。
 
@@ -211,6 +212,33 @@ cp env.template .env
 股指衍生品指标：四大期指基差（含年化）+ 期权 PCR（分交易所）
 
 - **date**: 查询日期 YYYY-MM-DD，默认今天
+
+### `get_global_markets_tool`
+
+全球市场快照（盘前一键）：六组并行聚合，单组失败不影响整体
+
+- **groups**: 美股/美债/汇率/亚太/商品/恐慌（逗号分隔），默认"全部"
+
+美股(纳指/标普/道指/费半)、美债(10Y/30Y+bp变动, 日债10Y/20Y/30Y来自日本财务省)、
+汇率(美元指数+离岸人民币)、亚太(日经/KOSPI/恒生科技)、商品(布伦特/WTI/COMEX黄金主力)、
+恐慌(VIX)。国内直连为主源，Yahoo(经`YAHOO_PROXY`代理)为备源。
+
+### `get_stock_global_snapshot_tool`
+
+全球个股快照（Yahoo 经 `YAHOO_PROXY` 代理，美股含盘后/盘前涨跌）
+
+- **symbols**: 显式 Yahoo 代码（如 `NVDA,000660.KS`），优先于 preset
+- **preset**: `ai_chain`(算力链8只含台积电) / `storage`(存储链5只) / `etf`(SMH/AIQ/BOTZ) / `all`
+
+### `get_fed_watch_tool`
+
+美联储预期简版：美债 2Y + 10Y-2Y 利差 + 2Y 周变动(bp)
+
+### `get_global_linkage_review_tool`
+
+共振复盘：隔夜全球（纳指/费半涨跌、美债/日债 bp 变动）vs 当日 A 股（指数/涨跌家数/电子通信板块资金流）对照
+
+- **date**: A股交易日 YYYY-MM-DD，默认今天（板块资金流仅当日口径可得）
 
 ## 使用示例
 
