@@ -277,7 +277,7 @@ def test_fetch_yahoo_quote(monkeypatch):
 
 
 def test_fetch_yahoo_quote_no_proxy(monkeypatch):
-    monkeypatch.delenv("YAHOO_PROXY")
+    monkeypatch.delenv("YAHOO_PROXY", raising=False)
     assert gc.fetch_yahoo_quote("NVDA") is None
 
 
@@ -1517,7 +1517,7 @@ def test_get_stock_global_snapshot_partial_fail(monkeypatch):
 
 
 def test_get_stock_global_snapshot_no_proxy(monkeypatch):
-    monkeypatch.delenv("YAHOO_PROXY")
+    monkeypatch.delenv("YAHOO_PROXY", raising=False)
     out = json.loads(gs.get_stock_global_snapshot())
     assert out["success"] is False
     assert "YAHOO_PROXY" in out["error"]
