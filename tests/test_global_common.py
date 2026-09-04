@@ -40,3 +40,51 @@ def test_fetch_tencent_quotes_http_fail(monkeypatch):
     )
     monkeypatch.setattr(gc, "std_requests", fake)
     assert gc.fetch_tencent_quotes(["usIXIC"]) == {"usIXIC": None}
+
+
+def _yahoo_meta():
+    return {
+        "chart": {
+            "result": [
+                {
+                    "meta": {
+                        "currency": "USD",
+                        "shortName": "NVIDIA Corporation",
+                        "regularMarketPrice": 228.45,
+                        "chartPreviousClose": 227.97,
+                        "postMarketPrice": 229.0,
+                    }
+                }
+            ],
+            "error": None,
+        }
+    }
+
+
+def test_fetch_yahoo_quote(monkeypatch):
+    monkeypatch.setenv("YAHOO_PROXY", "http://p:7890")
+    fake = SimpleNamespace(
+        get=lambda url, params, impersonate, timeout, proxies: SimpleNamespace(
+            status_code=200, json=lambda: _yahoo_meta()
+        )
+    )
+    monkeypatch.setattr(gc, "cr_requests", fake)
+    q = gc.fetch_yahoo_quote("NVDA", include_pre_post=True)
+    assert q["close"] == 228.45
+    assert q["chg_pct"] == round((228.45 / 227.97 - 1) * 100, 2)
+    assert q["after_hours_pct"] == round((229.0 / 228.45 - 1) * 100, 2)
+    assert q["currency"] == "USD"
+
+
+def test_fetch_yahoo_quote_no_proxy(monkeypatch):
+    monkeypatch.delenv("YAHOO_PROXY", raising=False)
+    assert gc.fetch_yahoo_quote("NVDA") is None
+
+
+def test_fetch_yahoo_quote_http_fail(monkeypatch):
+    monkeypatch.setenv("YAHOO_PROXY", "http://p:7890")
+    fake = SimpleNamespace(
+        get=lambda url, **kw: SimpleNamespace(status_code=403)
+    )
+    monkeypatch.setattr(gc, "cr_requests", fake)
+    assert gc.fetch_yahoo_quote("NVDA") is None

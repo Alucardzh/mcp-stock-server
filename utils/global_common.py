@@ -67,3 +67,45 @@ def fetch_tencent_quotes(codes: list[str]) -> dict[str, dict | None]:
         except (ValueError, IndexError):
             continue
     return out
+
+
+def fetch_yahoo_quote(symbol: str, include_pre_post: bool = False) -> dict | None:
+    """Yahoo 单只行情(必须经 YAHOO_PROXY，curl_cffi 浏览器指纹)；
+    未配置代理/请求失败/非200 一律返回 None 由调用方降级"""
+    proxies = yahoo_proxy()
+    if proxies is None:
+        return None
+    params = {"range": "5d", "interval": "1d"}
+    if include_pre_post:
+        params["includePrePost"] = "true"
+    try:
+        r = cr_requests.get(
+            YAHOO_CHART_URL.format(symbol=symbol),
+            params=params,
+            impersonate="chrome",
+            timeout=8,
+            proxies=proxies,
+        )
+        if r.status_code != 200:
+            return None
+        meta = r.json()["chart"]["result"][0]["meta"]
+    except Exception as e:  # noqa: BLE001
+        logger.warning("yahoo %s failed: %s", symbol, e)
+        return None
+    px = meta.get("regularMarketPrice")
+    prev = meta.get("chartPreviousClose")
+    quote = {
+        "symbol": symbol,
+        "name": meta.get("shortName", ""),
+        "currency": meta.get("currency", ""),
+        "close": safe_num(px, 4),
+        "chg_pct": round((px / prev - 1) * 100, 2) if px and prev else None,
+    }
+    if include_pre_post:
+        post = meta.get("postMarketPrice")
+        pre = meta.get("preMarketPrice")
+        if post and px:
+            quote["after_hours_pct"] = round((post / px - 1) * 100, 2)
+        elif pre and px:
+            quote["after_hours_pct"] = round((pre / px - 1) * 100, 2)
+    return quote
