@@ -1809,8 +1809,12 @@ def get_global_linkage_review(date: str = "") -> str:
         except Exception as e:  # noqa: BLE001
             overnight["us10y_chg_bp"] = None
             notes.append(f"[us10y] 失败: {e}")
-        j_prev = jgb_yield_on(prev)
-        j_prev2 = jgb_yield_on(prev2)
+        try:
+            j_prev = jgb_yield_on(prev)
+            j_prev2 = jgb_yield_on(prev2)
+        except Exception as e:  # noqa: BLE001 单腿降级, 不影响整体
+            j_prev = j_prev2 = None
+            notes.append(f"[japan] 失败: {e}")
         if j_prev:
             overnight["japan10y"] = j_prev["y10"]
             overnight["japan10y_chg_bp"] = (
