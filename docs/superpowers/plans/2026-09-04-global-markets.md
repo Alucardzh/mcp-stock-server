@@ -1561,7 +1561,7 @@ PRESETS: dict[str, list[str]] = {
     ],
     "etf": ["SMH", "AIQ", "BOTZ"],  # AI 情绪代理 ETF
 }
-PRESETS["all"] = sum(PRESETS[k] for k in ("ai_chain", "storage", "etf"))
+PRESETS["all"] = sum((PRESETS[k] for k in ("ai_chain", "storage", "etf")), [])
 
 
 def _market_of(symbol: str) -> str:
