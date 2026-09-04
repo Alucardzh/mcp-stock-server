@@ -1065,11 +1065,13 @@ def _em_global_indexes() -> pd.DataFrame | None:
     return df
 
 
-def _em_index(kw: str, name: str) -> dict | None:
+def _em_index(code: str, name: str) -> dict | None:
+    """东财全球指数：按稳定代码精确匹配（响应同时含 KOSPI200 与 KS11 等，
+    名称子串匹配会选错行且响应按涨跌幅排序不可依赖）"""
     df = _em_global_indexes()
     if df is None:
         return None
-    hit = df[df["名称"].astype(str).str.contains(kw, na=False)]
+    hit = df[df["代码"].astype(str) == code]
     if hit.empty:
         return None
     r = hit.iloc[0]
