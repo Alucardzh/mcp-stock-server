@@ -142,3 +142,56 @@ def test_bond_group_section(monkeypatch):
     )
     out = gm.bond_group_section()
     assert out["us10y"] == 4.77 and out["japan10y"] == 2.987
+
+
+def _patch_all_sections(monkeypatch, recorder):
+    for name in ("us_equities_section", "fx_section", "asia_section",
+                 "commodities_section", "fear_section", "bond_group_section"):
+        def make(n):
+            def fn():
+                recorder.append(n)
+                return {"notes": [], "marker": n}
+            return fn
+        monkeypatch.setattr(gm, name, make(name))
+
+
+def test_get_global_markets_all(monkeypatch):
+    gm._result_cache = {}
+    recorder = []
+    _patch_all_sections(monkeypatch, recorder)
+    import json
+    out = json.loads(gm.get_global_markets())
+    assert out["success"] is True
+    assert set(recorder) == {
+        "us_equities_section", "fx_section", "asia_section",
+        "commodities_section", "fear_section", "bond_group_section",
+    }
+    d = out["data"]
+    assert d["美股"]["marker"] == "us_equities_section"
+    assert "T+" in d["as_of"] or "+08:00" in d["as_of"]
+
+
+def test_get_global_markets_groups_filter(monkeypatch):
+    gm._result_cache = {}
+    recorder = []
+    _patch_all_sections(monkeypatch, recorder)
+    import json
+    out = json.loads(gm.get_global_markets("美股,恐慌"))
+    assert out["success"] is True
+    assert set(recorder) == {"us_equities_section", "fear_section"}
+    assert "美股" in out["data"] and "恐慌" in out["data"] and "亚太" not in out["data"]
+
+
+def test_get_global_markets_cache(monkeypatch):
+    gm._result_cache = {}
+    recorder = []
+    _patch_all_sections(monkeypatch, recorder)
+    gm.get_global_markets("美股")
+    gm.get_global_markets("美股")
+    assert recorder.count("us_equities_section") == 1  # 第二次命中缓存
+
+
+def test_get_global_markets_bad_group():
+    import json
+    out = json.loads(gm.get_global_markets("月球"))
+    assert out["success"] is False

@@ -234,3 +234,87 @@ def bond_group_section() -> dict:
         raise ValueError("美债与日债均失败")
     out["notes"] = notes
     return out
+
+
+from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime
+
+from .review_common import json_err, json_ok
+
+GROUP_SECTIONS = {
+    "美股": us_equities_section,
+    "美债": bond_group_section,
+    "汇率": fx_section,
+    "亚太": asia_section,
+    "商品": commodities_section,
+    "恐慌": fear_section,
+}
+
+_result_cache: dict[str, CachedData] = {}
+
+
+def get_global_markets(groups: str = "全部") -> str:
+    """全球市场快照：六组并行聚合（盘前一键拉取）
+
+    Args:
+        groups: 逗号分隔的组名(美股/美债/汇率/亚太/商品/恐慌)，默认"全部"
+    """
+    try:
+        g = (groups or "全部").strip()
+        if g in ("", "全部", "all"):
+            selected = list(GROUP_SECTIONS)
+        else:
+            selected = [s.strip() for s in g.replace("，", ",").split(",") if s.strip()]
+            bad = [s for s in selected if s not in GROUP_SECTIONS]
+            if bad:
+                return json_err(
+                    f"groups 仅支持 {'/'.join(GROUP_SECTIONS)} 或 全部，无法识别: {','.join(bad)}"
+                )
+        key = ",".join(selected)
+        cached = _result_cache.get(key)
+        if cached is not None and not cached.is_expired():
+            return cached.data
+
+        # jobs 必须在函数体内按名解析模块全局（globals()），保证测试 monkeypatch 生效
+        _name_to_fn = {
+            "美股": "us_equities_section",
+            "美债": "bond_group_section",
+            "汇率": "fx_section",
+            "亚太": "asia_section",
+            "商品": "commodities_section",
+            "恐慌": "fear_section",
+        }
+        jobs = [(name, globals()[_name_to_fn[name]]) for name in selected]
+
+        def run(name, fn):
+            try:
+                data = fn()
+                mod_notes = data.pop("notes", [])
+                return name, data, [f"[{name}] {n}" for n in mod_notes], None
+            except Exception as e:  # noqa: BLE001
+                logger.warning("group %s failed: %s", name, e)
+                return name, None, [], str(e)
+
+        with ThreadPoolExecutor(max_workers=6) as pool:
+            results = list(pool.map(lambda nf: run(nf[0], nf[1]), jobs))
+        data = {
+            "as_of": datetime.now().astimezone().isoformat(timespec="seconds"),
+        }
+        notes, errors = [], {}
+        for name, section, mod_notes, err in results:
+            data[name] = section
+            notes.extend(mod_notes)
+            if err:
+                errors[name] = err
+        if all(data.get(name) is None for name, _ in jobs):
+            return json_err("全球市场六组数据均失败")
+        if notes:
+            data["notes"] = notes
+        if errors:
+            data["errors"] = errors
+        out = json_ok(data)
+        _result_cache[key] = CachedData(out, ttl=300)
+        return out
+    except Exception as e:  # noqa: BLE001
+        logger.error("Error in get_global_markets: %s", e)
+        return json_err(f"查询全球市场失败: {e}")
