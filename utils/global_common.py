@@ -9,6 +9,7 @@
 import logging
 import os
 import re
+import time
 from datetime import date as date_type
 from pathlib import Path
 
@@ -31,6 +32,8 @@ MOF_ALL_URL = (
     "historical/jgbcme_all.csv"
 )
 MOF_CACHE_DIR = Path(__file__).resolve().parent.parent / "data" / "global"
+
+_yahoo_429_until: float = 0.0  # Yahoo 429 冷却截止时间戳(冷却期内直接返回 None 不发请求)
 
 
 def yahoo_proxy() -> dict | None:
@@ -72,8 +75,11 @@ def fetch_tencent_quotes(codes: list[str]) -> dict[str, dict | None]:
 def fetch_yahoo_quote(symbol: str, include_pre_post: bool = False) -> dict | None:
     """Yahoo 单只行情(必须经 YAHOO_PROXY，curl_cffi 浏览器指纹)；
     未配置代理/请求失败/非200 一律返回 None 由调用方降级"""
+    global _yahoo_429_until
     proxies = yahoo_proxy()
     if proxies is None:
+        return None
+    if time.time() < _yahoo_429_until:
         return None
     params = {"range": "5d", "interval": "1d"}
     if include_pre_post:
@@ -86,6 +92,15 @@ def fetch_yahoo_quote(symbol: str, include_pre_post: bool = False) -> dict | Non
             timeout=8,
             proxies=proxies,
         )
+        if r.status_code == 429:
+            retry_after = r.headers.get("Retry-After")
+            try:
+                cooldown = min(float(retry_after), 600.0) if retry_after else 300.0
+            except (TypeError, ValueError):
+                cooldown = 300.0
+            _yahoo_429_until = time.time() + cooldown
+            logger.warning("yahoo 429 rate-limited, cooldown %.0fs", cooldown)
+            return None
         if r.status_code != 200:
             return None
         meta = r.json()["chart"]["result"][0]["meta"]

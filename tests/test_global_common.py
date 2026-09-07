@@ -90,6 +90,23 @@ def test_fetch_yahoo_quote_http_fail(monkeypatch):
     assert gc.fetch_yahoo_quote("NVDA") is None
 
 
+def test_fetch_yahoo_quote_429_cooldown(monkeypatch):
+    monkeypatch.setenv("YAHOO_PROXY", "http://p:7890")
+    gc._yahoo_429_until = 0.0
+    calls = {"n": 0}
+
+    def fake_get(url, **kw):
+        calls["n"] += 1
+        return SimpleNamespace(status_code=429, headers={"Retry-After": "120"})
+
+    monkeypatch.setattr(gc, "cr_requests", SimpleNamespace(get=fake_get))
+    assert gc.fetch_yahoo_quote("NVDA") is None
+    assert gc._yahoo_429_until > 0  # 进入冷却
+    assert gc.fetch_yahoo_quote("NVDA") is None
+    assert calls["n"] == 1  # 冷却期内不再发请求
+    gc._yahoo_429_until = 0.0  # 清理, 不影响其他测试
+
+
 from datetime import date
 
 MOF_TEXT = "\n".join(
