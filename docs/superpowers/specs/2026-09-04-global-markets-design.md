@@ -87,7 +87,11 @@ tests/                    # 全 mock + live 冒烟（默认跳过）
 ### 4.2 `get_stock_global_snapshot(symbols: str = "", preset: str = "ai_chain") -> str`
 
 - preset：`ai_chain`（NVDA/AVGO/MRVL/COHR/LITE/APH/ANET + 台积电 2330.TW）/ `storage`（000660.KS/005930.KS/285A.T/MU/SNDK）/ `etf`（SMH/AIQ/BOTZ）/ `all`（三组并集）；symbols 显式代码（逗号分隔，Yahoo 语法）优先于 preset
-- Yahoo 并行逐只（ThreadPoolExecutor）；美股附 `after_hours_pct`（includePrePost）；单只失败→该行 `{symbol, close: null, error}`；Yahoo 整体不可用→error 信封（本工具唯一源）
+- **主源 = 腾讯批量**（2026-09-04 实测：美股 `us+代码`（9只全带中文名）、日股 `jp+代码`（285A）、韩股 `kr+6位代码`（000660）均可用；台湾 `.TW` 不支持）；一次 HTTP 批量拉全部可映射代码，直连零积分
+- **Yahoo（经代理）为兜底**：仅服务腾讯不可映射（.TW）或腾讯返回空的代码；串行小间隔调用；`after_hours_pct` 仅此路径提供（腾讯美股无盘后字段，[33]/[34] 为当日高低）
+- **429 感知**：`fetch_yahoo_quote` 命中 429 后进入冷却期（尊重 Retry-After，上限600s，默认300s），冷却期内直接返回 None 不发请求；批量场景自动快速失败
+- 未配置 YAHOO_PROXY 时：美股/日韩代码仍可用（腾讯主源），仅兜底代码降级为 error 行+note
+- 单只失败→该行 error 占位；整体结果按 (symbols|preset) 缓存 300 秒
 - 返回 `{as_of, quotes: [{symbol, name, market, currency, close, chg_pct, after_hours_pct?}]}`
 
 ### 4.3 `get_fed_watch() -> str`
