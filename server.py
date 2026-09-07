@@ -14,7 +14,6 @@ from fastmcp import FastMCP
 
 # Import our analysis modules
 from utils import (
-    StockCal,
     calculate_support_resistance_func,
     get_cffex_rank,
     get_daily_review,
@@ -35,7 +34,6 @@ from utils import (
     get_ths_hot_list,
     get_zt_pool,
 )
-from utils.schema import StockCalLimit
 
 # Configure logging
 logging.basicConfig(
@@ -65,30 +63,6 @@ def get_akproxy_token_info() -> str:
             return resp.read().decode("utf-8")
     except Exception as e:
         return f"查询失败: {e}"
-
-
-@mcp.tool
-def suggestion_by_my_method(data: StockCalLimit) -> str:
-    """使用自定义算法分析涨停股池，结合同花顺热度数据
-
-    该工具会：
-    1. 获取同花顺热门股票榜单
-    2. 筛选符合条件的涨停股票（连板数≥2，涨停统计≥0.666）
-    3. 分析股票的技术形态和历史高点
-    4. 返回综合分析结果
-
-    Args:
-        data (StockCalLimit): 分析参数配置
-            - limit: 返回股票数量限制 (1-100, 默认100)
-            - span: 时间跨度 ("hour": 近1小时榜, "day": 今日榜, 默认"hour")
-            - total_market_value: 流通市值上限 (亿元, 默认200)
-            - has_front: 是否包含前排股 (True/False, 默认False)
-
-    Returns:
-        str: JSON格式的分析结果，包含消息和股票数据
-    """
-    get_data = StockCal(data=data)
-    return get_data.get_daily_code_data()
 
 
 @mcp.tool
@@ -355,7 +329,6 @@ def stock_analysis() -> str:
     - get_stock_history_tool: 获取历史价格数据
     - calculate_support_resistance_tool: 计算支撑位和压力位
     - get_stock_realtime_tool: 获取实时价格数据
-    - suggestion_by_my_method: 使用自定义算法分析涨停股池
     """
 
 
@@ -373,29 +346,6 @@ def market_overview() -> str:
     4. 市场趋势和投资建议
 
     请使用数据驱动的分析方法，提供客观的市场分析。
-    """
-
-
-@mcp.prompt()
-def limit_stock_analysis() -> str:
-    """涨停股池分析提示"""
-    return """
-    你是一个专业的短线交易分析师，专门分析A股涨停股池。
-
-    请根据以下参数分析涨停股票：
-    - limit: 返回股票数量限制 (1-100)
-    - span: 时间跨度 (hour: 近1小时榜, day: 今日榜)
-    - total_market_value: 流通市值上限 (亿元)
-    - has_front: 是否包含前排股 (True/False)
-
-    分析维度包括：
-    1. 涨停统计和连板数分析
-    2. 热度和成交额排名
-    3. 所属行业分布
-    4. 技术形态分析（当前价格与历史高点的比较）
-    5. 短线交易机会和风险提示
-
-    使用suggestion_by_my_method工具获取数据，并提供专业的分析建议。
     """
 
 

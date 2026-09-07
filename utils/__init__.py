@@ -6,7 +6,6 @@
 # @ Description:
 """
 
-from .my_module import StockCal
 from .etf import get_etf_daily
 from .ths import get_ths_hot_list
 from .tools import (
@@ -27,7 +26,6 @@ from .global_stocks import get_stock_global_snapshot
 from .global_linkage import get_global_linkage_review
 
 __all__ = [
-    "StockCal",
     "get_etf_daily",
     "get_ths_hot_list",
     "get_stock_history",

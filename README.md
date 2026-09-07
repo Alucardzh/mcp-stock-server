@@ -146,15 +146,6 @@ cp env.template .env
 - **span**: 时间跨度 ("hour" 近 1 小时榜, "day" 今日榜，默认 "hour")
 - **limit**: 返回数量 (1-100，默认 100)
 
-### `suggestion_by_my_method`
-
-使用自定义算法分析涨停股池，结合同花顺热度数据（参数为 `StockCalLimit` 对象）
-
-- **limit**: 返回股票数量限制 (1-100，默认 100)
-- **span**: 时间跨度 ("hour" 近 1 小时榜, "day" 今日榜)
-- **total_market_value**: 流通市值上限 (亿元，默认 200)
-- **has_front**: 是否包含前排股 (默认 false)
-
 ### `get_akproxy_token_info`
 
 查询 akshare-proxy 服务的积分剩余额度（无需参数）。
