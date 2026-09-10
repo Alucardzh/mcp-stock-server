@@ -14,12 +14,12 @@ __all__ = [
     "get_market_index",
     "get_stock_symbol_by_name",
 ]
-from os import getenv
 import functools
 import json
 import logging
 import time
 from http.client import RemoteDisconnected
+from os import getenv
 from typing import Any
 from urllib.error import URLError
 
@@ -42,11 +42,10 @@ akshare_proxy_patch.install_patch(
 )
 from akshare import (
     stock_individual_info_em,
-    stock_zh_a_hist,
-    stock_zh_a_spot_em,
     stock_zh_index_spot_em,
 )
 
+from .ef import ef_spot_all, ef_stock_hist
 from .support_resistance import calculate_support_resistance
 from .validate import (
     format_stock_data,
@@ -108,9 +107,9 @@ def _get_cached_spot_data(ttl: int = 5) -> pd.DataFrame:
     if _spot_data_cache is not None and not _spot_data_cache.is_expired():
         return _spot_data_cache.data
 
-    # 否则获取新数据并缓存
+    # 否则获取新数据并缓存（efinance 并行分页，akproxy 推荐路径）
     logger.info("Refreshing spot data cache with TTL=%ds", ttl)
-    new_data = stock_zh_a_spot_em()
+    new_data = ef_spot_all()
     _spot_data_cache = CachedData(new_data, ttl=ttl)
     return new_data
 
@@ -243,11 +242,11 @@ def get_stock_history(
             start_date, end_date, default_period_days=90
         )
         logger.info("Fetching historical data for %s", symbol)
-        # Format dates for akshare
+        # Format dates for efinance (YYYYMMDD)
         start_date_formatted = start_date.replace("-", "") if start_date else ""
         end_date_formatted = end_date.replace("-", "") if end_date else ""
-        # Fetch data from Akshare
-        data = stock_zh_a_hist(
+        # Fetch data via efinance (akproxy 推荐路径)
+        data = ef_stock_hist(
             symbol=symbol,
             period=period,
             start_date=start_date_formatted,
@@ -264,7 +263,7 @@ def get_stock_history(
                 indent=2,
             )
         # Format response
-        response = format_stock_data(data)
+        response = format_stock_data(data, source="efinance")
         if response.success:
             return json.dumps(
                 response.model_dump(exclude_none=True), ensure_ascii=False, indent=2
@@ -348,7 +347,7 @@ def get_stock_realtime(symbol: str) -> str:
                     else None
                 ),
                 "update_time": pd.Timestamp.now().isoformat(),
-                "source": "akshare_realtime",
+                "source": "efinance_realtime",
             },
         }
         return json.dumps(result, ensure_ascii=False, indent=2)
@@ -434,7 +433,7 @@ def calculate_support_resistance_func(
         start_date, end_date = parse_date_range(None, None, default_period_days=180)
         start_date_formatted = start_date.replace("-", "")
         end_date_formatted = end_date.replace("-", "")
-        hist_data = stock_zh_a_hist(
+        hist_data = ef_stock_hist(
             symbol=symbol,
             period="daily",
             start_date=start_date_formatted,

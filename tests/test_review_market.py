@@ -125,7 +125,7 @@ def test_breadth_section_today(monkeypatch):
     )
     monkeypatch.setattr(
         rm,
-        "stock_zh_a_spot_em",
+        "ef_spot_all",
         lambda: pd.DataFrame({"代码": ["1", "2", "3"], "涨跌幅": [1.0, -2.0, 0.0]}),
     )
     out = rm.breadth_section(date(2026, 9, 3))

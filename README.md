@@ -259,7 +259,8 @@ mcp-stock-server/
 
 - fastmcp: MCP 服务器框架
 - akshare: 股票数据源
-- akshare-proxy-patch (>=0.5.0): akshare 数据代理补丁，需配合 `AKPROXY_TOKEN` 使用
+- efinance (>=0.5.9): 东财行情并行通道（个股K线、全市场快照；akproxy 推荐，更快且更省积分）
+- akshare-proxy-patch (>=0.5.0): akshare/efinance 数据代理补丁，需配合 `AKPROXY_TOKEN` 使用
 - pandas: 数据处理
 - numpy: 数值计算
 
