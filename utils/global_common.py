@@ -1,21 +1,27 @@
 #!/usr/bin/env python3
 """
-全球市场模块共享 fetcher：腾讯批量行情、Yahoo(经代理)、MOF日债(三级链)。
+全球市场模块共享 fetcher：腾讯批量行情、Yahoo(akproxy yfinance 通道或 YAHOO_PROXY)、
+MOF日债(三级链)。
 
-代理原则：YAHOO_PROXY 未配置或不可达时，所有 Yahoo 路径返回 None，
-由调用方降级到国内直连源——服务不依赖代理存活。
+代理原则：Yahoo 行情优先走 akproxy yfinance 付费通道(复用 AKPROXY_TOKEN)；
+akproxy 授权失败时回退 YAHOO_PROXY；两者均不可用时所有 Yahoo 路径返回 None，
+由调用方降级到国内直连源——服务不依赖任一代理存活。
 """
 
 import logging
 import os
 import re
+import threading
 import time
 from datetime import date as date_type
 from pathlib import Path
 
 import pandas as pd
 import requests as std_requests
-from curl_cffi import requests as cr_requests
+
+# 真实 curl_cffi Session：akshare_proxy_patch 会替换包属性 requests.Session，
+# 但不会动子模块里的类本身。Yahoo 请求需要真实会话以保留浏览器指纹(impersonate)。
+from curl_cffi.requests.session import Session as _CurlSession
 
 from .review_common import safe_num
 from .tools import CachedData
@@ -33,6 +39,13 @@ MOF_ALL_URL = (
 )
 MOF_CACHE_DIR = Path(__file__).resolve().parent.parent / "data" / "global"
 
+# akproxy yfinance 通道（与 akshare_proxy_patch.yfinance 同一授权接口/参数/缓存节奏）
+AKPROXY_IP = "101.201.173.125"
+_YF_AUTH_TTL = 30.0  # 代理授权缓存秒数, 对齐官方 AuthCache
+_YF_FAIL_TTL = 10.0  # 授权失败负缓存秒数, 防止多标的兜底循环反复打授权接口
+_yf_proxy_cache: dict = {"proxy": None, "expire": 0.0, "fail_until": 0.0}
+_yf_proxy_lock = threading.Lock()
+
 _yahoo_429_until: float = 0.0  # Yahoo 429 冷却截止时间戳(冷却期内直接返回 None 不发请求)
 
 
@@ -40,6 +53,51 @@ def yahoo_proxy() -> dict | None:
     """YAHOO_PROXY 环境变量 -> requests proxies dict；未配置返回 None"""
     p = (os.getenv("YAHOO_PROXY") or "").strip()
     return {"http": p, "https": p} if p else None
+
+
+def akproxy_yahoo_proxies() -> dict | None:
+    """akproxy yfinance-auth 代理(30s TTL 缓存)。
+
+    与 akshare_proxy_patch.yfinance.install_yfinance_patch_main 走同一授权接口
+    (http://{AKPROXY_IP}:47001/api/yfinance-auth)，但显式取代理而不打全局猴子补丁，
+    规避与 akshare PatchedSession 的安装顺序耦合。未配置 AKPROXY_TOKEN 或授权
+    失败(带 10s 负缓存)返回 None。
+    """
+    token = (os.getenv("AKPROXY_TOKEN") or "").strip()
+    if not token:
+        return None
+    now = time.time()
+    if _yf_proxy_cache["proxy"] and now < _yf_proxy_cache["expire"]:
+        return {"http": _yf_proxy_cache["proxy"], "https": _yf_proxy_cache["proxy"]}
+    if now < _yf_proxy_cache["fail_until"]:
+        return None
+    with _yf_proxy_lock:
+        now = time.time()
+        if _yf_proxy_cache["proxy"] and now < _yf_proxy_cache["expire"]:
+            return {"http": _yf_proxy_cache["proxy"], "https": _yf_proxy_cache["proxy"]}
+        if now < _yf_proxy_cache["fail_until"]:
+            return None
+        try:
+            r = std_requests.get(
+                f"http://{AKPROXY_IP}:47001/api/yfinance-auth",
+                params={"token": token, "version": "0.3.0"},
+                timeout=(1.5, 3),
+            )
+            data = r.json()
+            if data.get("proxy"):
+                _yf_proxy_cache["proxy"] = data["proxy"]
+                _yf_proxy_cache["expire"] = time.time() + _YF_AUTH_TTL
+                return {"http": data["proxy"], "https": data["proxy"]}
+            logger.warning("akproxy yfinance-auth 拒绝: %s", data.get("error_msg"))
+        except Exception as e:  # noqa: BLE001
+            logger.warning("akproxy yfinance-auth 请求异常: %s", e)
+        _yf_proxy_cache["fail_until"] = time.time() + _YF_FAIL_TTL
+        return None
+
+
+def yahoo_proxies() -> dict | None:
+    """Yahoo 行情实际使用的代理：akproxy yfinance 通道优先，YAHOO_PROXY 显式配置兜底"""
+    return akproxy_yahoo_proxies() or yahoo_proxy()
 
 
 def fetch_tencent_quotes(codes: list[str]) -> dict[str, dict | None]:
@@ -73,10 +131,10 @@ def fetch_tencent_quotes(codes: list[str]) -> dict[str, dict | None]:
 
 
 def fetch_yahoo_quote(symbol: str, include_pre_post: bool = False) -> dict | None:
-    """Yahoo 单只行情(必须经 YAHOO_PROXY，curl_cffi 浏览器指纹)；
-    未配置代理/请求失败/非200 一律返回 None 由调用方降级"""
+    """Yahoo 单只行情(经 akproxy yfinance 通道或 YAHOO_PROXY，curl_cffi 浏览器指纹)；
+    无可用代理/请求失败/非200 一律返回 None 由调用方降级"""
     global _yahoo_429_until
-    proxies = yahoo_proxy()
+    proxies = yahoo_proxies()
     if proxies is None:
         return None
     if time.time() < _yahoo_429_until:
@@ -85,13 +143,14 @@ def fetch_yahoo_quote(symbol: str, include_pre_post: bool = False) -> dict | Non
     if include_pre_post:
         params["includePrePost"] = "true"
     try:
-        r = cr_requests.get(
-            YAHOO_CHART_URL.format(symbol=symbol),
-            params=params,
-            impersonate="chrome",
-            timeout=8,
-            proxies=proxies,
-        )
+        with _CurlSession() as s:
+            r = s.get(
+                YAHOO_CHART_URL.format(symbol=symbol),
+                params=params,
+                impersonate="chrome",
+                timeout=8,
+                proxies=proxies,
+            )
         if r.status_code == 429:
             retry_after = r.headers.get("Retry-After")
             try:

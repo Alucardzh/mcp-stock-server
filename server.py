@@ -283,7 +283,7 @@ def get_global_markets_tool(groups: str = "全部") -> str:
 
 @mcp.tool()
 def get_stock_global_snapshot_tool(symbols: str = "", preset: str = "ai_chain") -> str:
-    """全球个股快照：光模块/存储链海外对标组（Yahoo经代理，需配置YAHOO_PROXY）
+    """全球个股快照：光模块/存储链海外对标组（腾讯主源，Yahoo兜底走akproxy或YAHOO_PROXY）
 
     Args:
         symbols: 显式Yahoo代码(逗号分隔，如 "NVDA,000660.KS")，优先于preset

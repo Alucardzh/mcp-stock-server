@@ -61,14 +61,91 @@ def _yahoo_meta():
     }
 
 
-def test_fetch_yahoo_quote(monkeypatch):
-    monkeypatch.setenv("YAHOO_PROXY", "http://p:7890")
-    fake = SimpleNamespace(
-        get=lambda url, params, impersonate, timeout, proxies: SimpleNamespace(
-            status_code=200, json=lambda: _yahoo_meta()
-        )
+def test_akproxy_yahoo_proxies_no_token(monkeypatch):
+    monkeypatch.delenv("AKPROXY_TOKEN", raising=False)
+    monkeypatch.setattr(
+        gc, "_yf_proxy_cache", {"proxy": None, "expire": 0.0, "fail_until": 0.0}
     )
-    monkeypatch.setattr(gc, "cr_requests", fake)
+    assert gc.akproxy_yahoo_proxies() is None
+
+
+def test_akproxy_yahoo_proxies_auth_and_cache(monkeypatch):
+    monkeypatch.setenv("AKPROXY_TOKEN", "tok")
+    monkeypatch.setattr(
+        gc, "_yf_proxy_cache", {"proxy": None, "expire": 0.0, "fail_until": 0.0}
+    )
+    calls = []
+
+    class _Resp:
+        def json(self):
+            return {"proxy": "http://1.2.3.4:8080"}
+
+    monkeypatch.setattr(
+        gc, "std_requests", SimpleNamespace(get=lambda url, **kw: calls.append(url) or _Resp())
+    )
+    assert gc.akproxy_yahoo_proxies() == {
+        "http": "http://1.2.3.4:8080", "https": "http://1.2.3.4:8080",
+    }
+    assert gc.akproxy_yahoo_proxies()  # 30s 缓存命中
+    assert len(calls) == 1
+    assert calls[0].startswith("http://") and "/api/yfinance-auth" in calls[0]
+
+
+def test_akproxy_yahoo_proxies_fail_negative_cache(monkeypatch):
+    monkeypatch.setenv("AKPROXY_TOKEN", "tok")
+    monkeypatch.setattr(
+        gc, "_yf_proxy_cache", {"proxy": None, "expire": 0.0, "fail_until": 0.0}
+    )
+    calls = []
+
+    class _Resp:
+        def json(self):
+            return {"error_msg": "积分不足"}
+
+    monkeypatch.setattr(
+        gc, "std_requests", SimpleNamespace(get=lambda url, **kw: calls.append(url) or _Resp())
+    )
+    assert gc.akproxy_yahoo_proxies() is None
+    assert gc.akproxy_yahoo_proxies() is None  # 负缓存窗口内不再打授权接口
+    assert len(calls) == 1
+
+
+def test_yahoo_proxies_precedence(monkeypatch):
+    monkeypatch.setattr(gc, "akproxy_yahoo_proxies", lambda: {"http": "ak", "https": "ak"})
+    monkeypatch.setenv("YAHOO_PROXY", "http://p:7890")
+    assert gc.yahoo_proxies() == {"http": "ak", "https": "ak"}  # akproxy 优先
+    monkeypatch.setattr(gc, "akproxy_yahoo_proxies", lambda: None)
+    assert gc.yahoo_proxies() == {"http": "http://p:7890", "https": "http://p:7890"}
+    monkeypatch.delenv("YAHOO_PROXY", raising=False)
+    assert gc.yahoo_proxies() is None
+
+
+def _fake_curl(resp):
+    """_CurlSession 替身：断言 chrome 指纹保留"""
+
+    class _S:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def get(self, url, params=None, impersonate=None, timeout=None, proxies=None):
+            assert impersonate == "chrome"
+            assert proxies is not None
+            return resp
+
+    return _S
+
+
+def test_fetch_yahoo_quote(monkeypatch):
+    monkeypatch.delenv("AKPROXY_TOKEN", raising=False)
+    monkeypatch.setenv("YAHOO_PROXY", "http://p:7890")
+    monkeypatch.setattr(
+        gc,
+        "_CurlSession",
+        _fake_curl(SimpleNamespace(status_code=200, json=lambda: _yahoo_meta())),
+    )
     q = gc.fetch_yahoo_quote("NVDA", include_pre_post=True)
     assert q["close"] == 228.45
     assert q["chg_pct"] == round((228.45 / 227.97 - 1) * 100, 2)
@@ -76,21 +153,46 @@ def test_fetch_yahoo_quote(monkeypatch):
     assert q["currency"] == "USD"
 
 
+def test_fetch_yahoo_quote_via_akproxy(monkeypatch):
+    """akproxy 通道：无 YAHOO_PROXY 也能走通"""
+    monkeypatch.setenv("AKPROXY_TOKEN", "tok")
+    monkeypatch.delenv("YAHOO_PROXY", raising=False)
+    monkeypatch.setattr(
+        gc, "_yf_proxy_cache",
+        {"proxy": "http://1.2.3.4:8080", "expire": 0.0, "fail_until": 0.0},
+    )
+    monkeypatch.setattr(gc, "std_requests", SimpleNamespace(
+        get=lambda url, **kw: SimpleNamespace(
+            json=lambda: {"proxy": "http://1.2.3.4:8080"}
+        )
+    ))
+    monkeypatch.setattr(
+        gc,
+        "_CurlSession",
+        _fake_curl(SimpleNamespace(status_code=200, json=lambda: _yahoo_meta())),
+    )
+    q = gc.fetch_yahoo_quote("NVDA", include_pre_post=True)
+    assert q["close"] == 228.45
+    assert q["currency"] == "USD"
+
+
 def test_fetch_yahoo_quote_no_proxy(monkeypatch):
+    monkeypatch.delenv("AKPROXY_TOKEN", raising=False)
     monkeypatch.delenv("YAHOO_PROXY", raising=False)
     assert gc.fetch_yahoo_quote("NVDA") is None
 
 
 def test_fetch_yahoo_quote_http_fail(monkeypatch):
+    monkeypatch.delenv("AKPROXY_TOKEN", raising=False)
     monkeypatch.setenv("YAHOO_PROXY", "http://p:7890")
-    fake = SimpleNamespace(
-        get=lambda url, **kw: SimpleNamespace(status_code=403)
+    monkeypatch.setattr(
+        gc, "_CurlSession", _fake_curl(SimpleNamespace(status_code=403))
     )
-    monkeypatch.setattr(gc, "cr_requests", fake)
     assert gc.fetch_yahoo_quote("NVDA") is None
 
 
 def test_fetch_yahoo_quote_429_cooldown(monkeypatch):
+    monkeypatch.delenv("AKPROXY_TOKEN", raising=False)
     monkeypatch.setenv("YAHOO_PROXY", "http://p:7890")
     gc._yahoo_429_until = 0.0
     calls = {"n": 0}
@@ -99,7 +201,16 @@ def test_fetch_yahoo_quote_429_cooldown(monkeypatch):
         calls["n"] += 1
         return SimpleNamespace(status_code=429, headers={"Retry-After": "120"})
 
-    monkeypatch.setattr(gc, "cr_requests", SimpleNamespace(get=fake_get))
+    class _Ctx:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        get = staticmethod(fake_get)
+
+    monkeypatch.setattr(gc, "_CurlSession", _Ctx)
     assert gc.fetch_yahoo_quote("NVDA") is None
     assert gc._yahoo_429_until > 0  # 进入冷却
     assert gc.fetch_yahoo_quote("NVDA") is None

@@ -7,11 +7,11 @@
 after_hours_pct 仅 Yahoo 路径提供（腾讯美股无盘后字段）。
 """
 
-from datetime import datetime
 import logging
 import time
+from datetime import datetime
 
-from .global_common import fetch_tencent_quotes, fetch_yahoo_quote, yahoo_proxy
+from .global_common import fetch_tencent_quotes, fetch_yahoo_quote, yahoo_proxies
 from .review_common import json_err, json_ok
 from .tools import CachedData
 
@@ -103,10 +103,11 @@ def get_stock_global_snapshot(symbols: str = "", preset: str = "ai_chain") -> st
                 yahoo_needed.append(sym)
 
         if yahoo_needed:
-            has_proxy = yahoo_proxy() is not None
+            has_proxy = yahoo_proxies() is not None
             if not has_proxy:
                 notes.append(
-                    "未配置 YAHOO_PROXY, 以下代码无法走Yahoo兜底: " + ",".join(yahoo_needed)
+                    "无可用Yahoo通道(YAHOO_PROXY未配置且akproxy授权失败), "
+                    "以下代码无法走Yahoo兜底: " + ",".join(yahoo_needed)
                 )
             for i, sym in enumerate(yahoo_needed):
                 row = {
@@ -130,7 +131,7 @@ def get_stock_global_snapshot(symbols: str = "", preset: str = "ai_chain") -> st
                     else:
                         row["error"] = "获取失败(腾讯与Yahoo均不可用)"
                 else:
-                    row["error"] = "腾讯不支持且未配置YAHOO_PROXY"
+                    row["error"] = "腾讯不支持且无可用Yahoo通道"
                 quotes.append(row)
 
         failed = [q["symbol"] for q in quotes if q.get("close") is None]

@@ -38,6 +38,7 @@ def test_tencent_primary(monkeypatch):
 
 def test_yahoo_fallback_for_tw_and_miss(monkeypatch):
     gs._result_cache = {}
+    monkeypatch.delenv("AKPROXY_TOKEN", raising=False)
     monkeypatch.setattr(
         gs, "fetch_tencent_quotes",
         lambda codes: {"usNVDA": _tq(230.36, "英伟达")},  # usMU 缺失
@@ -64,6 +65,7 @@ def test_yahoo_fallback_for_tw_and_miss(monkeypatch):
 
 def test_no_proxy_tencent_still_works(monkeypatch):
     gs._result_cache = {}
+    monkeypatch.delenv("AKPROXY_TOKEN", raising=False)
     monkeypatch.delenv("YAHOO_PROXY", raising=False)
     monkeypatch.setattr(
         gs, "fetch_tencent_quotes",
