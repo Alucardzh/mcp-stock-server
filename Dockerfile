@@ -6,16 +6,17 @@ WORKDIR /app
 # 安装 uv
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 
-# 复制项目文件
-COPY pyproject.toml .
+# 复制项目文件（uv.lock 必须带上：否则镜像内 uv sync 会解析最新版依赖，
+# 与本地锁定验证过的版本不一致，导致行为漂移）
+COPY pyproject.toml uv.lock ./
 COPY server.py .
 COPY utils/ ./utils/
 COPY README.md .
 
-# 创建虚拟环境并安装依赖
+# 创建虚拟环境并安装依赖（严格按 uv.lock 锁定版本）
 RUN uv venv /root/.venv --clear && \
     export PATH="/root/.venv/bin:$PATH" && \
-    cd /app && uv sync
+    cd /app && uv sync --frozen
 
 # 设置环境变量
 ENV PATH="/root/.venv/bin:$PATH"
