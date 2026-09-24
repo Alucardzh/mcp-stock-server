@@ -84,3 +84,21 @@ def ef_spot_all() -> pd.DataFrame:
     ef = _load_ef()
     df = ef.stock.get_realtime_quotes()
     return df.rename(columns=_SPOT_RENAME)
+
+
+_ETF_SPOT_RENAME = {
+    "股票代码": "代码",
+    "股票名称": "名称",
+    "昨日收盘": "昨收",
+    "最新交易日": "数据日期",
+}
+
+
+def ef_etf_spot() -> pd.DataFrame:
+    """全市场 ETF 实时快照（约1600只），列名与 fund_etf_spot_em 基本对齐。
+
+    与 akshare.fund_etf_spot_em 的差异：无 主力净流入-净额 / 最新份额 列，
+    多 最新交易日 列（可直接用作快照日期）。"""
+    ef = _load_ef()
+    df = ef.stock.get_realtime_quotes(["ETF"])
+    return df.rename(columns=_ETF_SPOT_RENAME)

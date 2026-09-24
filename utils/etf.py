@@ -3,27 +3,36 @@
 ETF 单日数据统一查询模块。
 
 一次调用返回指定日期的行情（价格/涨跌幅/成交额）、资金（主力净流入）、
-份额及份额变化数据，并输出合并汇总。支持单只、多只、预设组合或全部 ETF。
+份额及份额变化数据，并输出合并汇总。支持单只、多只、预设组合或全部国家队 ETF。
 
-数据源（akshare，经 akshare-proxy 代理）：
-- fund_etf_spot_em   东方财富 ETF 实时行情快照（含主力净流入、最新份额、数据日期）
-- fund_etf_hist_em   东方财富 ETF 历史日行情（历史日期模式，逐只查询）
-- fund_etf_scale_sse 上交所每日 ETF 份额（计算沪市 ETF 的份额变化）
+数据通道（efinance 为主、akshare 东财为备，与项目 ef.py 通道架构一致）：
+- 行情快照: efinance ['ETF'] 并行通道 -> 失败回退 akshare.fund_etf_spot_em
+- 历史日K : efinance get_quote_history -> 失败回退 akshare.fund_etf_hist_em
+- 份额变化: 上交所 fund_etf_scale_sse（按日，交易所直连，非东财）
+- 深市份额: 深交所 fund_etf_scale_szse（最新快照；深交所无按日历史，变化无法计算）
 
 口径说明：
-- 主力净流入为东方财富口径（超大单+大单净额），仅当日快照可提供；
-- 份额变化 = 当日份额 - 上一交易日份额（交易所口径），深交所仅提供当前份额
-  快照，无按日历史，因此深市 ETF 的份额变化无法计算。
+- 主力净流入为东方财富口径（超大单+大单净额），仅 akshare 备用通道生效时提供，
+  efinance 主通道无此字段；
+- 份额变化 = 当日份额 - 上一交易日份额（交易所口径）。efinance 主通道下，
+  沪市份额取最近已发布交易日（收盘后为当日），深市仅提供最新快照份额。
 """
 
 from datetime import date as date_type, datetime, timedelta
 import json
 import logging
+import re
 
 import pandas as pd
 
-from akshare import fund_etf_hist_em, fund_etf_scale_sse, fund_etf_spot_em
+from akshare import (
+    fund_etf_hist_em,
+    fund_etf_scale_sse,
+    fund_etf_scale_szse,
+    fund_etf_spot_em,
+)
 
+from .ef import ef_etf_spot, ef_stock_hist
 from .tools import (
     CachedData,
     RateLimiter,
@@ -53,7 +62,10 @@ MAX_DETAIL_ITEMS = 30  # 查询数量超过该值时省略明细，只输出汇�
 MAX_HIST_SYMBOLS = 20  # 历史日期模式逐只查询上限
 TOP_N = 5
 
-_spot_cache: CachedData | None = None
+_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+_spot_cache: CachedData | None = None  # data = (DataFrame, source)
+_szse_scale_cache: CachedData | None = None
 _scale_sse_cache: dict[str, CachedData | None] = {}
 
 
@@ -72,14 +84,33 @@ def _num(value, ndigits: int = 2):
         return None
 
 
-def _get_spot() -> pd.DataFrame:
-    """获取（带缓存）全市场 ETF 实时快照"""
+def _yi(value, ndigits: int = 2):
+    """元 -> 亿元"""
+    v = _num(value, ndigits=6)
+    return None if v is None else round(v / 1e8, ndigits)
+
+
+def _get_spot() -> tuple[pd.DataFrame, str]:
+    """获取（带缓存）全市场 ETF 快照：efinance 主通道，akshare 备用
+
+    返回 (DataFrame, source)；source 为 "efinance" 或 "akshare"。
+    efinance 快照无 主力净流入-净额/最新份额 列。
+    """
     global _spot_cache
     if _spot_cache is not None and not _spot_cache.is_expired():
         return _spot_cache.data
-    df = fund_etf_spot_em()
-    _spot_cache = CachedData(df, ttl=60)
-    return df
+    df, source = None, None
+    try:
+        df = ef_etf_spot()
+        source = "efinance"
+    except Exception as e:  # noqa: BLE001
+        logger.warning("efinance ETF spot failed, fallback to akshare: %s", e)
+    if df is None or df.empty:
+        df = fund_etf_spot_em()
+        source = "akshare"
+    result = (df, source)
+    _spot_cache = CachedData(result, ttl=60)
+    return result
 
 
 def _get_scale_sse(day_compact: str) -> pd.DataFrame | None:
@@ -100,6 +131,26 @@ def _get_scale_sse(day_compact: str) -> pd.DataFrame | None:
     return df
 
 
+def _get_scale_szse() -> dict:
+    """深市 ETF 最新份额快照 -> {代码: 份额(份)}；失败返回空 dict（缓存1小时）"""
+    global _szse_scale_cache
+    if _szse_scale_cache is not None and not _szse_scale_cache.is_expired():
+        return _szse_scale_cache.data
+    try:
+        df = fund_etf_scale_szse()
+        shares = pd.to_numeric(df["基金份额"], errors="coerce")
+        m = {
+            str(c): float(s)
+            for c, s in zip(df["基金代码"].astype(str), shares)
+            if s == s
+        }
+    except Exception as e:  # noqa: BLE001
+        logger.warning("fund_etf_scale_szse failed: %s", e)
+        m = {}
+    _szse_scale_cache = CachedData(m, ttl=3600)
+    return m
+
+
 def _prev_weekday(day: date_type) -> date_type:
     d = day - timedelta(days=1)
     while d.weekday() >= 5:  # 5=周六 6=周日
@@ -114,9 +165,11 @@ def _prev_scale_sse(day: date_type) -> tuple[str, dict] | None:
         df = _get_scale_sse(d.strftime("%Y%m%d"))
         if df is not None:
             shares = pd.to_numeric(df["基金份额"], errors="coerce")
-            return d.strftime("%Y-%m-%d"), dict(
-                zip(df["基金代码"].astype(str), shares)
-            )
+            return d.strftime("%Y-%m-%d"), {
+                str(c): float(s)
+                for c, s in zip(df["基金代码"].astype(str), shares)
+                if s == s
+            }
         d = _prev_weekday(d)
     return None
 
@@ -146,34 +199,37 @@ def _parse_symbols(symbols: str):
     return codes, unmatched, f"指定{len(codes)}只"
 
 
-def _items_from_spot(spot: pd.DataFrame, prev_map: dict | None) -> list[dict]:
-    """从实时快照构建全部条目（内部使用，含全市场）"""
-    prev_map = prev_map or {}
+def _items_from_spot(
+    spot: pd.DataFrame,
+    shares_now: dict,
+    shares_prev: dict,
+) -> list[dict]:
+    """从实时快照构建全部条目（内部使用，含全市场）
+
+    shares_now/shares_prev: {代码: 份额(份)}，prev 仅覆盖沪市（可算变化）。
+    """
+    has_main_inflow = "主力净流入-净额" in spot.columns
     items = []
     for _, row in spot.iterrows():
         code = str(row["代码"])
-        shares = _num(row.get("最新份额"), 4)
-        prev = prev_map.get(code)
+        price = _num(row.get("最新价"), 3)
+        now_s = shares_now.get(code)
+        prev_s = shares_prev.get(code)
         share_change = (
-            _num((float(row["最新份额"]) - float(prev)) / 1e8, 4)
-            if shares is not None and prev is not None and prev == prev
+            _num((now_s - prev_s) / 1e8, 4)
+            if now_s is not None and prev_s is not None
             else None
         )
-        price = _num(row.get("最新价"), 3)
         items.append(
             {
                 "code": code,
                 "name": str(row.get("名称", "")),
                 "price": price,
                 "change_pct": _num(row.get("涨跌幅")),
-                "amount_yi": _num(float(row["成交额"]) / 1e8) if _num(row.get("成交额")) is not None else None,
-                "market_cap_yi": _num(float(row["总市值"]) / 1e8) if _num(row.get("总市值")) is not None else None,
-                "main_inflow_yi": (
-                    _num(float(row["主力净流入-净额"]) / 1e8)
-                    if "主力净流入-净额" in row and _num(row.get("主力净流入-净额")) is not None
-                    else None
-                ),
-                "shares_yi": _num(float(row["最新份额"]) / 1e8, 4) if shares is not None else None,
+                "amount_yi": _yi(row.get("成交额")),
+                "market_cap_yi": _yi(row.get("总市值")),
+                "main_inflow_yi": _yi(row.get("主力净流入-净额")) if has_main_inflow else None,
+                "shares_yi": _num(now_s / 1e8, 4) if now_s is not None else None,
                 "share_change_yi": share_change,
                 "est_net_flow_yi": (
                     round(share_change * price, 4)
@@ -185,42 +241,55 @@ def _items_from_spot(spot: pd.DataFrame, prev_map: dict | None) -> list[dict]:
     return items
 
 
-def _items_from_hist(
-    codes: list[str], day: date_type, name_map: dict, q_map: dict, p_map: dict
-) -> tuple[list[dict], list[str]]:
-    """历史日期模式：逐只查询日行情构建条目"""
+def _hist_one(code: str, day: date_type) -> pd.DataFrame | None:
+    """单只 ETF 单日K线：efinance 主通道，akshare 备用；无数据返回 None"""
     compact = day.strftime("%Y%m%d")
+    want = day.strftime("%Y-%m-%d")
+    for fetch in (
+        lambda: ef_stock_hist(code, start_date=compact, end_date=compact, adjust=""),
+        lambda: fund_etf_hist_em(
+            symbol=code, period="daily", start_date=compact, end_date=compact, adjust=""
+        ),
+    ):
+        try:
+            h = fetch()
+        except Exception as e:  # noqa: BLE001
+            logger.warning("hist fetch failed for %s: %s", code, e)
+            continue
+        if h is not None and not h.empty and "日期" in h.columns:
+            h = h[h["日期"].astype(str).str.startswith(want)]
+            if not h.empty:
+                return h
+    return None
+
+
+def _items_from_hist(
+    codes: list[str], day: date_type, q_map: dict, p_map: dict
+) -> tuple[list[dict], list[str]]:
+    """历史日期模式：逐只查询日行情构建条目（份额仅沪市可算）"""
     items, no_data = [], []
     for code in codes:
-        try:
-            h = fund_etf_hist_em(
-                symbol=code, period="daily", start_date=compact, end_date=compact, adjust=""
-            )
-        except Exception as e:  # noqa: BLE001
-            logger.warning("fund_etf_hist_em(%s) failed: %s", code, e)
-            no_data.append(code)
-            continue
-        h = h[h["日期"] == day.strftime("%Y-%m-%d")] if h is not None and not h.empty else h
-        if h is None or h.empty:
+        h = _hist_one(code, day)
+        if h is None:
             no_data.append(code)
             continue
         r = h.iloc[0]
         price = _num(r["收盘"], 3)
         shares_q = q_map.get(code)
         shares_p = p_map.get(code)
-        shares_yi = _num(float(shares_q) / 1e8, 4) if shares_q is not None and shares_q == shares_q else None
+        shares_yi = _num(shares_q / 1e8, 4) if shares_q is not None else None
         share_change = (
-            _num((float(shares_q) - float(shares_p)) / 1e8, 4)
-            if shares_q is not None and shares_p is not None and shares_q == shares_q and shares_p == shares_p
+            _num((shares_q - shares_p) / 1e8, 4)
+            if shares_q is not None and shares_p is not None
             else None
         )
         items.append(
             {
                 "code": code,
-                "name": name_map.get(code, ""),
+                "name": str(r.get("股票名称", "") or ""),
                 "price": price,
                 "change_pct": _num(r["涨跌幅"]),
-                "amount_yi": _num(float(r["成交额"]) / 1e8) if _num(r.get("成交额")) is not None else None,
+                "amount_yi": _yi(r.get("成交额")),
                 "market_cap_yi": (
                     round(shares_yi * price, 2) if shares_yi is not None and price else None
                 ),
@@ -237,7 +306,7 @@ def _items_from_hist(
     return items, no_data
 
 
-def _merge(items: list[dict], has_main_inflow: bool) -> dict:
+def _merge(items: list[dict]) -> dict:
     """合并汇总：总量、涨跌结构、份额与资金变化、榜单"""
     chg = [i["change_pct"] for i in items if i["change_pct"] is not None]
     cap_pairs = [
@@ -264,10 +333,9 @@ def _merge(items: list[dict], has_main_inflow: bool) -> dict:
         "total_share_change_yi": None,
         "est_net_subscription_yi": None,
     }
-    if has_main_inflow:
-        merged["total_main_inflow_yi"] = round(
-            sum(i["main_inflow_yi"] for i in items if i["main_inflow_yi"] is not None), 2
-        )
+    inflow = [i["main_inflow_yi"] for i in items if i["main_inflow_yi"] is not None]
+    if inflow:
+        merged["total_main_inflow_yi"] = round(sum(inflow), 2)
 
     valid_sc = [i for i in items if i["share_change_yi"] is not None]
     if valid_sc:
@@ -313,12 +381,10 @@ def _merge(items: list[dict], has_main_inflow: bool) -> dict:
 def _single_rank(spot: pd.DataFrame, code: str) -> dict:
     """单只查询时，给出该 ETF 在全市场的规模/成交额排名"""
     try:
-        cap_rank = (
-            spot["总市值"].astype(float).rank(ascending=False, method="min")[spot["代码"] == code]
-        )
-        amt_rank = (
-            spot["成交额"].astype(float).rank(ascending=False, method="min")[spot["代码"] == code]
-        )
+        cap = pd.to_numeric(spot["总市值"], errors="coerce")
+        amt = pd.to_numeric(spot["成交额"], errors="coerce")
+        cap_rank = cap.rank(ascending=False, method="min")[spot["代码"] == code]
+        amt_rank = amt.rank(ascending=False, method="min")[spot["代码"] == code]
         return {
             "market_cap_rank": int(cap_rank.iloc[0]) if not cap_rank.empty else None,
             "amount_rank": int(amt_rank.iloc[0]) if not amt_rank.empty else None,
@@ -348,6 +414,45 @@ def _proxy_hint() -> str:
             return f"代理token有效，余额 {r.read().decode('utf-8', 'ignore')[:100]}（问题可能在代理服务或网络）"
     except Exception as e:  # noqa: BLE001
         return f"代理token无效或代理服务不可达({e})，请核对部署机 AKPROXY_TOKEN"
+
+
+def _spot_shares_for_today(spot: pd.DataFrame, source: str, eff_day: date_type, notes: list):
+    """当日模式的份额口径组装 -> (shares_now, shares_prev)
+
+    - akshare 通道: spot 最新份额列（两市最新已发布），沪市变化对比上一发布日
+    - efinance 通道: 沪市取 scale_sse 最近两个发布日，深市取交易所最新快照（无变化）
+    """
+    if source == "akshare" and "最新份额" in spot.columns:
+        shares_now = {
+            str(r["代码"]): float(r["最新份额"])
+            for _, r in spot.iterrows()
+            if _num(r["最新份额"]) is not None
+        }
+        prev = _prev_scale_sse(eff_day)
+        shares_prev = prev[1] if prev else {}
+        if not shares_prev:
+            notes.append("沪市上一交易日份额数据不可用，份额变化无法计算")
+        return shares_now, shares_prev
+
+    latest = _prev_scale_sse(eff_day)
+    shares_prev: dict = {}
+    shares_now: dict = {}
+    if latest is None:
+        notes.append("沪市份额数据不可用，份额与变化仅深市快照可提供")
+    else:
+        latest_day = datetime.strptime(latest[0], "%Y-%m-%d").date()
+        prev2 = _prev_scale_sse(latest_day)
+        shares_now.update(latest[1])
+        shares_prev = prev2[1] if prev2 else {}
+    sz_map = _get_scale_szse()
+    if sz_map:
+        shares_now.update(sz_map)
+    else:
+        notes.append("深市份额快照不可用")
+    notes.append(
+        f"份额为最近已发布数据(沪市截至{latest[0] if latest else 'N/A'})，深市为交易所最新快照"
+    )
+    return shares_now, shares_prev
 
 
 @RateLimiter(max_calls=10, time_window=60)
@@ -381,29 +486,25 @@ def get_etf_daily(symbols: str = "", date: str = "") -> str:
 
         # ---------- 当日模式：一次快照拿全部 ----------
         if qday == today:
-            spot = _get_spot()
-            if spot is None or spot.empty:
-                return _err("未获取到 ETF 行情快照")
-            spot_date = (
+            spot, source = _get_spot()
+            spot_date_raw = (
                 str(spot["数据日期"].iloc[0])[:10]
                 if "数据日期" in spot.columns
-                else str(today)
+                else ""
             )
-            if spot_date != str(today):
+            if not _DATE_RE.match(spot_date_raw):
+                spot_date_raw = str(today)
+            if spot_date_raw != str(today):
                 notes.append(
-                    f"今日({today})无快照（非交易日或未开盘），返回最近交易日 {spot_date} 数据"
+                    f"今日({today})无快照（非交易日或未开盘），返回最近交易日 {spot_date_raw} 数据"
                 )
             eff_day = (
-                datetime.strptime(spot_date, "%Y-%m-%d").date()
-                if spot_date != str(today)
+                datetime.strptime(spot_date_raw, "%Y-%m-%d").date()
+                if spot_date_raw != str(today)
                 else today
             )
-            prev = _prev_scale_sse(eff_day)
-            prev_map = prev[1] if prev else {}
-            if not prev_map:
-                notes.append("沪市上一交易日份额数据不可用，份额变化无法计算")
-            all_items = _items_from_spot(spot, prev_map)
-            name_map = {i["code"]: i["name"] for i in all_items}
+            shares_now, shares_prev = _spot_shares_for_today(spot, source, eff_day, notes)
+            all_items = _items_from_spot(spot, shares_now, shares_prev)
             if codes:
                 found = {i["code"] for i in all_items}
                 missing = [c for c in codes if c not in found]
@@ -414,23 +515,19 @@ def get_etf_daily(symbols: str = "", date: str = "") -> str:
                     return _err(f"未找到任何匹配的ETF: {','.join(codes)}")
             else:
                 items = all_items
+            notes.append(f"数据源: {source}通道" + ("（主力净流入不可用）" if source == "efinance" else ""))
             data = {
-                "date": spot_date,
+                "date": spot_date_raw,
                 "mode": mode_desc,
-                "merged": _merge(items, has_main_inflow=True),
+                "merged": _merge(items),
             }
             if not codes and len(items) == len(all_items):
                 data["total_etfs"] = len(all_items)
             if len(codes or []) == 1:
                 data["single_rank"] = _single_rank(spot, codes[0])
-            intraday = datetime.now().hour < 15 and spot_date == str(today)
+            intraday = datetime.now().hour < 15 and spot_date_raw == str(today)
             if intraday:
                 notes.append("盘中实时快照，收盘后数据会更新")
-            # 深市份额变化的口径限制提示
-            if any(i["share_change_yi"] is None and i["shares_yi"] is not None for i in items):
-                notes.append(
-                    "份额变化仅覆盖沪市ETF（深交所无按日份额历史），深市ETF仅提供最新份额"
-                )
 
         # ---------- 历史模式：逐只查询 ----------
         else:
@@ -447,29 +544,20 @@ def get_etf_daily(symbols: str = "", date: str = "") -> str:
                 return _err("未指定任何有效的ETF代码")
             scale_q = _get_scale_sse(qday.strftime("%Y%m%d"))
             q_map = (
-                dict(
-                    zip(
+                {
+                    str(c): float(s)
+                    for c, s in zip(
                         scale_q["基金代码"].astype(str),
                         pd.to_numeric(scale_q["基金份额"], errors="coerce"),
                     )
-                )
+                    if s == s
+                }
                 if scale_q is not None
                 else {}
             )
             prev = _prev_scale_sse(qday)
             p_map = prev[1] if prev else {}
-            name_map: dict = {}
-            try:
-                name_map = {
-                    str(r["代码"]): str(r["名称"]) for _, r in _get_spot().iterrows()
-                }
-            except Exception as e:  # noqa: BLE001
-                logger.warning("spot fetch for name mapping failed: %s", e)
-                notes.append("行情快照不可用，基金名称回退为交易所简称")
-            if scale_q is not None:
-                for _, r in scale_q.iterrows():
-                    name_map.setdefault(str(r["基金代码"]), str(r["基金简称"]))
-            items, no_data = _items_from_hist(codes, qday, name_map, q_map, p_map)
+            items, no_data = _items_from_hist(codes, qday, q_map, p_map)
             if no_data:
                 notes.append(
                     f"以下代码在 {qday} 无数据(可能为非交易日或已退市): {','.join(no_data)}"
@@ -483,9 +571,9 @@ def get_etf_daily(symbols: str = "", date: str = "") -> str:
             data = {
                 "date": str(qday),
                 "mode": mode_desc,
-                "merged": _merge(items, has_main_inflow=False),
+                "merged": _merge(items),
             }
-            notes.append("历史日期无主力净流入数据(东财仅提供当日快照)")
+            notes.append("历史日期无主力净流入数据(仅当日东财快照提供)")
             if any(i["shares_yi"] is None for i in items):
                 notes.append("深市ETF无历史份额数据，规模与份额变化仅覆盖沪市")
 
