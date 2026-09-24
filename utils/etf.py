@@ -24,7 +24,12 @@ import pandas as pd
 
 from akshare import fund_etf_hist_em, fund_etf_scale_sse, fund_etf_spot_em
 
-from .tools import CachedData, RateLimiter, with_retry
+from .tools import (
+    CachedData,
+    RateLimiter,
+    RETRYABLE_EXCEPTIONS,
+    with_retry,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -328,6 +333,23 @@ def _err(msg: str) -> str:
     return json.dumps({"success": False, "error": msg}, ensure_ascii=False, indent=2)
 
 
+def _proxy_hint() -> str:
+    """代理链路自检：东财数据经 101.201.173.125 代理访问，失败时给出可定位的原因"""
+    import urllib.request
+    from os import getenv
+
+    token = getenv("AKPROXY_TOKEN", "")
+    if not token:
+        return "当前服务未配置 AKPROXY_TOKEN（检查部署机 .env/环境变量后重启容器）"
+    try:
+        with urllib.request.urlopen(
+            f"http://101.201.173.125:47001/api/token/{token}", timeout=5
+        ) as r:
+            return f"代理token有效，余额 {r.read().decode('utf-8', 'ignore')[:100]}（问题可能在代理服务或网络）"
+    except Exception as e:  # noqa: BLE001
+        return f"代理token无效或代理服务不可达({e})，请核对部署机 AKPROXY_TOKEN"
+
+
 @RateLimiter(max_calls=10, time_window=60)
 @with_retry(max_retries=3, delay=1.0, backoff=2.0)
 def get_etf_daily(symbols: str = "", date: str = "") -> str:
@@ -436,17 +458,27 @@ def get_etf_daily(symbols: str = "", date: str = "") -> str:
             )
             prev = _prev_scale_sse(qday)
             p_map = prev[1] if prev else {}
-            name_map = {
-                str(r["代码"]): str(r["名称"]) for _, r in _get_spot().iterrows()
-            }
+            name_map: dict = {}
+            try:
+                name_map = {
+                    str(r["代码"]): str(r["名称"]) for _, r in _get_spot().iterrows()
+                }
+            except Exception as e:  # noqa: BLE001
+                logger.warning("spot fetch for name mapping failed: %s", e)
+                notes.append("行情快照不可用，基金名称回退为交易所简称")
+            if scale_q is not None:
+                for _, r in scale_q.iterrows():
+                    name_map.setdefault(str(r["基金代码"]), str(r["基金简称"]))
             items, no_data = _items_from_hist(codes, qday, name_map, q_map, p_map)
             if no_data:
                 notes.append(
                     f"以下代码在 {qday} 无数据(可能为非交易日或已退市): {','.join(no_data)}"
                 )
             if not items:
+                hint = f"；网络自检: {_proxy_hint()}" if len(no_data) == len(codes) else ""
                 return _err(
-                    f"{qday} 未查询到任何数据，请确认该日为交易日且代码正确"
+                    f"{qday} 未查询到任何数据（{len(no_data)}/{len(codes)}只获取失败），"
+                    f"请确认该日为交易日且代码正确{hint}"
                 )
             data = {
                 "date": str(qday),
@@ -469,4 +501,7 @@ def get_etf_daily(symbols: str = "", date: str = "") -> str:
         )
     except Exception as e:  # noqa: BLE001
         logger.error("Error in get_etf_daily: %s", e)
-        return _err(f"查询ETF数据失败: {e}")
+        msg = f"查询ETF数据失败: {e}"
+        if isinstance(e, RETRYABLE_EXCEPTIONS) or "Disconnected" in str(e):
+            msg += f"。东财数据经代理访问失败，{ _proxy_hint() }"
+        return _err(msg)
