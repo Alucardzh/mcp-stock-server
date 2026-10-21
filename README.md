@@ -231,6 +231,10 @@ cp env.template .env
 
 - **date**: A股交易日 YYYY-MM-DD，默认今天（板块资金流仅当日口径可得）
 
+### `get_stock_intraday_tool`
+
+查询个股分钟分时（1分钟仅当日，5分钟可回溯历史）。`mode=summary` 返回竞价撮合价、开盘/尾盘30分钟统计、全天高低点时间、涨停触碰时间线；`mode=full` 返回全量分钟bar。
+
 ## 使用示例
 
 ```python

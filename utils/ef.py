@@ -16,7 +16,10 @@
 import pandas as pd
 
 # akshare 风格参数 -> efinance 数值
-_KLT_MAP = {"daily": 101, "weekly": 102, "monthly": 103}
+_KLT_MAP = {
+    "daily": 101, "weekly": 102, "monthly": 103,
+    "1": 1, "5": 5, "15": 15, "30": 30, "60": 60,
+}
 _FQT_MAP = {"qfq": 1, "hfq": 2}
 
 # 全市场快照列名：efinance -> akshare(stock_zh_a_spot_em) 风格

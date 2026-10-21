@@ -24,6 +24,7 @@ from .global_rates import get_fed_watch
 from .global_markets import get_global_markets
 from .global_stocks import get_stock_global_snapshot
 from .global_linkage import get_global_linkage_review
+from .intraday import get_stock_intraday
 
 __all__ = [
     "get_etf_daily",
@@ -45,4 +46,5 @@ __all__ = [
     "get_global_markets",
     "get_stock_global_snapshot",
     "get_global_linkage_review",
+    "get_stock_intraday",
 ]

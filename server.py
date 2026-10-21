@@ -30,6 +30,7 @@ from utils import (
     get_stock_basic,
     get_stock_global_snapshot,
     get_stock_history,
+    get_stock_intraday,
     get_stock_realtime,
     get_stock_symbol_by_name,
     get_ths_hot_list,
@@ -258,6 +259,21 @@ def get_zt_pool_tool(pool: str = "涨停", date: str = "") -> str:
         date: 查询日期 YYYY-MM-DD，默认今天；无数据时自动回退最近交易日
     """
     return get_zt_pool(pool, date)
+
+
+@mcp.tool()
+def get_stock_intraday_tool(
+    symbol: str, period: str = "1", mode: str = "summary", date: str = ""
+) -> str:
+    """查询个股分钟分时（1分钟仅当日、5分钟可回溯历史；默认摘要模式）
+
+    Args:
+        symbol: 6位股票代码
+        period: "1"/"5" 分钟粒度，默认"1"
+        mode: summary=竞价价/开盘30分钟/高低点时间/涨停触碰统计；full=全量bar
+        date: YYYY-MM-DD，默认今天
+    """
+    return get_stock_intraday(symbol, period, mode, date)
 
 
 @mcp.tool()
