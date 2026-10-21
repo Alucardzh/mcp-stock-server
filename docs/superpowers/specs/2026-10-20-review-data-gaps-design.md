@@ -24,7 +24,7 @@
 | 涨停等五池 | — | akshare `stock_zt_pool_em` 等 5 个 | ✅ date | push2ex（走 proxy，已有） |
 | 封板时间字段 | — | 同上原始字段 | ✅ | 同上 |
 | 分钟分时 | ef `get_quote_history(klt=1/5)` | akshare `stock_zh_a_hist_min_em` | 1min 仅当日 / 5min 历史 | push2his（已 hook） |
-| 竞价分时（当日） | ef `get_deal_detail` | 腾讯分笔（可选，不实现） | ❌ 仅当日 | push2（已 hook） |
+| 竞价分时（当日） | push2 `details/get` 直连（requests；efinance 封装会丢弃第 5 段方向字段） | — | ❌ 仅当日 | push2（已 hook） |
 | 行业+概念 | ef `get_belong_board` | akshare 概念名单（过滤用） | 实时 | push2（已 hook） |
 | 龙虎榜榜单 | ef `get_daily_billboard` | akshare `stock_lhb_detail_em` | ✅ | datacenter-web（榜单不需新 hook，走 efinance session 已被接管） |
 | 龙虎榜席位 | — | akshare / 裸 URL（lhb_fetch.py 同源） | ✅ | datacenter-web（**需加 hook_domains**） |
@@ -47,7 +47,7 @@
 ### 3.3 `get_stock_auction_tool`（新，竞价分时，P1）
 
 - 参数：`symbol`、`date`（默认当日）、`mode=summary|detail`（默认 summary）。
-- 主通道：ef `get_deal_detail` → 切 9:15-9:25 段。
+- 主通道：push2 `details/get` 直连（requests，保留原始五段：时间/价格/成交量/单数/方向）→ 切 9:15-9:25 段。
 - summary 输出：昨收（prePrice）、竞价撮合价、竞价量/额、高开幅度、9:15/9:20/9:25 三档价格轨迹（各段末价格+累计匹配量）、9:20-9:25 真实意愿段标注（9:20 前可撤单，假单噪音大）。
 - detail：竞价段逐笔快照（几十~几百行）。
 - 日期语义（读写穿透归档，见 §6）：
@@ -70,7 +70,7 @@
 ### 3.6 `get_lhb_seats_tool`（新，席位明细，P2）
 
 - 参数：`symbol`、`date`。
-- 通道：akshare 席位接口；若 akproxy 不放行 datacenter-web，则照搬 `temp/lhb_fetch.py` 裸 URL（同源，已在 cron 环境验证）。
+- 通道：akshare `stock_lhb_stock_detail_em(symbol, date, flag="买入"/"卖出")`（打 datacenter-web，需加 hook_domains）；若 akproxy 不放行，兜底照搬 `temp/lhb_fetch.py` 裸 URL（同源，已在 cron 环境验证）。
 - 输出：买/卖前 5 席位、金额（万元）、机构/外资/游资分类（沿用 lhb_fetch.py 的 classify 规则）。
 - 文档注明：当日数据 ≥18:00 拉取席位才齐全。
 
