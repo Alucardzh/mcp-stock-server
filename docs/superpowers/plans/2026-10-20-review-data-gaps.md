@@ -1383,6 +1383,7 @@ git commit -m "feat: add lhb seats tool via akshare with datacenter-web hooked"
 
 **Files:**
 - Create: `scripts/smoke_review_gaps.py`
+- Modify: `Dockerfile`（追加 `COPY scripts/ ./scripts/`，容器内冒烟用）
 
 **Interfaces:**
 - Consumes: 全部新工具（utils 层直调，导入 utils 即安装代理 patch）。
@@ -1415,7 +1416,7 @@ CHECKS = [
     ("auction 归档回读", lambda: get_stock_auction("600825", mode="detail")),
     ("boards 行业概念", lambda: get_stock_boards("600825")),
     ("lhb 榜单", lambda: get_lhb("2026-10-16")),
-    ("lhb 席位", lambda: get_lhb_seats("600825", "2026-10-16")),
+    ("lhb 席位", lambda: get_lhb_seats("000887", "2026-10-16")),  # 000887 已验证在 2026-10-16 榜单内
 ]
 
 
