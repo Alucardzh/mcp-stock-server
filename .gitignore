@@ -43,3 +43,6 @@ venv.bak/
 .superpowers/
 data/
 data/auction/
+
+# Local scratch (reference scripts, probes)
+temp/
