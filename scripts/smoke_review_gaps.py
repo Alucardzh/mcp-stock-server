@@ -20,7 +20,7 @@ CHECKS = [
     ("auction 归档回读", lambda: get_stock_auction("600825", mode="detail")),
     ("boards 行业概念", lambda: get_stock_boards("600825")),
     ("lhb 榜单", lambda: get_lhb("2026-10-16")),
-    ("lhb 席位", lambda: get_lhb_seats("600825", "2026-10-16")),
+    ("lhb 席位", lambda: get_lhb_seats("000887", "2026-10-16")),  # 000887 已验证在 2026-10-16 榜单内
 ]
 
 

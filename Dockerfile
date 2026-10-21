@@ -11,6 +11,7 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 COPY pyproject.toml uv.lock ./
 COPY server.py .
 COPY utils/ ./utils/
+COPY scripts/ ./scripts/
 COPY README.md .
 
 # 创建虚拟环境并安装依赖（严格按 uv.lock 锁定版本）
