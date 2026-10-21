@@ -775,7 +775,7 @@ def _belong_df():
 
 
 def _concept_df():
-    return pd.DataFrame({"板块代码": ["BK0733", "BK0509"], "板块名称": ["AI语料", "上海板块"]})
+    return pd.DataFrame({"板块代码": ["BK0733"], "板块名称": ["AI语料"]})
 
 
 def _industry_df():
