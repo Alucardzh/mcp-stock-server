@@ -235,6 +235,10 @@ cp env.template .env
 
 查询个股分钟分时（1分钟仅当日，5分钟可回溯历史）。`mode=summary` 返回竞价撮合价、开盘/尾盘30分钟统计、全天高低点时间、涨停触碰时间线；`mode=full` 返回全量分钟bar。
 
+### `get_stock_auction_tool`
+
+查询个股集合竞价分时（9:15-9:25 虚拟撮合过程，仅当日可拉取）。当日首次查询即落盘 CSV 归档（`data/auction/{code}/{date}.csv`），历史日期读归档。`mode=summary` 返回 9:15/9:20/9:25 三段轨迹、撮合价量、高开幅度；`mode=detail` 返回逐笔快照。
+
 ## 使用示例
 
 ```python

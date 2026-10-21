@@ -82,3 +82,49 @@ def test_intraday_bad_args(monkeypatch):
     assert not json.loads(itd.get_stock_intraday("600825", "3"))["success"]
     assert not json.loads(itd.get_stock_intraday("600825", "1", "x"))["success"]
     assert not json.loads(itd.get_stock_intraday("600825", "1", "summary", "bad"))["success"]
+
+
+def test_auction_live_then_archive(monkeypatch, tmp_path):
+    monkeypatch.setattr(itd, "AUCTION_ARCHIVE_ROOT", tmp_path)
+    monkeypatch.setattr(
+        itd,
+        "_fetch_deal_details",
+        lambda s: (
+            "10.0",
+            [
+                "09:15:00,10.1,9,0,4",
+                "09:19:30,10.2,50,0,4",
+                "09:21:00,10.3,80,0,4",
+                "09:25:00,10.4,120,0,4",
+                "09:30:00,10.4,130,0,1",
+            ],
+        ),
+    )
+    out = json.loads(itd.get_stock_auction("600825", "", "summary"))
+    d = out["data"]
+    assert d["source"] == "live"
+    assert d["match_price"] == 10.4
+    assert d["match_vol_hand"] == 120
+    assert d["track"]["0920_0925"]["cum_vol"] == 80
+    assert d["open_gap_pct"] == 4.0
+
+    # 二次调用：detail 走归档，不再触发网络
+    calls = []
+
+    def _no_fetch(s):
+        calls.append(1)
+        return ("10.0", [])
+
+    monkeypatch.setattr(itd, "_fetch_deal_details", _no_fetch)
+    out2 = json.loads(itd.get_stock_auction("600825", "", "detail"))
+    assert out2["data"]["source"] == "archive"
+    assert not calls
+    assert out2["data"]["items"][0]["方向"] == "4"
+    assert len(out2["data"]["items"]) == 4
+
+
+def test_auction_history_needs_archive(monkeypatch, tmp_path):
+    monkeypatch.setattr(itd, "AUCTION_ARCHIVE_ROOT", tmp_path)
+    out = json.loads(itd.get_stock_auction("600825", "2026-09-02"))
+    assert not out["success"]
+    assert "归档" in out["error"]

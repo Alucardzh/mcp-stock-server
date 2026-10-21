@@ -27,6 +27,7 @@ from utils import (
     get_margin,
     get_market_breadth,
     get_market_index,
+    get_stock_auction,
     get_stock_basic,
     get_stock_global_snapshot,
     get_stock_history,
@@ -274,6 +275,18 @@ def get_stock_intraday_tool(
         date: YYYY-MM-DD，默认今天
     """
     return get_stock_intraday(symbol, period, mode, date)
+
+
+@mcp.tool()
+def get_stock_auction_tool(symbol: str, date: str = "", mode: str = "summary") -> str:
+    """查询个股集合竞价分时（9:15-9:25 虚拟撮合；当日拉取即归档，历史读CSV归档）
+
+    Args:
+        symbol: 6位股票代码
+        date: YYYY-MM-DD，默认今天
+        mode: summary=9:15/9:20/9:25 三段轨迹+撮合价量/高开幅度；detail=逐笔快照
+    """
+    return get_stock_auction(symbol, date, mode)
 
 
 @mcp.tool()

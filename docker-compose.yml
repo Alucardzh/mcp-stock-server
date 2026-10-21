@@ -7,11 +7,14 @@ services:
     container_name: mcp-stock
     ports:
       - "18881:8000"
+    volumes:
+      - ./data/auction:/app/data/auction
     environment:
       - TZ=Asia/Shanghai
       - FASTMCP_HTTP_HOST_ORIGIN_PROTECTION=false
       - AKPROXY_TOKEN=${AKPROXY_TOKEN:-}
       - YAHOO_PROXY=${YAHOO_PROXY:-}
+      - AUCTION_ARCHIVE_ROOT=/app/data/auction
     restart: unless-stopped
     networks:
       - stock-network

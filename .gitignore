@@ -42,3 +42,4 @@ venv.bak/
 .DS_Store
 .superpowers/
 data/
+data/auction/

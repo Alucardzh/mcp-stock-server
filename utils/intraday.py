@@ -185,3 +185,129 @@ def get_stock_intraday(symbol: str, period: str = "1", mode: str = "summary", da
     except Exception as e:  # noqa: BLE001
         logger.error("Error in get_stock_intraday: %s", e)
         return json_err(f"查询分钟分时失败: {e}")
+
+
+def _secid(symbol: str) -> str:
+    return f"{1 if symbol.startswith('6') else 0}.{symbol}"
+
+
+def _fetch_deal_details(symbol: str):
+    """当日全量分笔（push2 details/get 直连；requests 已被 patch 接管走代理）
+
+    返回 (pre_price, details)；detail 为原始五段字符串 "时间,价格,成交量,单数,方向"。
+    pos=-1000000 即从头返回（竞价在响应头部）；流动性极高的个股响应可达数 MB，
+    仅按需调用可接受。
+    """
+    params = {
+        "secid": _secid(symbol),
+        "fields1": "f1,f2,f3,f4,f5",
+        "fields2": "f51,f52,f53,f54,f55",
+        "pos": "-1000000",
+    }
+    r = requests.get(
+        "https://push2.eastmoney.com/api/qt/stock/details/get",
+        params=params,
+        timeout=20,
+    )
+    data = r.json().get("data") or {}
+    return data.get("prePrice"), data.get("details") or []
+
+
+_AUCTION_HEADER = ["时间", "价格", "成交量", "单数", "方向"]
+
+
+def _auction_rows(details) -> list[list[str]]:
+    """切出 9:15-9:25 竞价段（含 09:25:00 撮合行）"""
+    return [d.split(",") for d in details if d[:5] <= "09:25"]
+
+
+def _archive_path(symbol: str, day: date_type) -> Path:
+    return AUCTION_ARCHIVE_ROOT / symbol / f"{day}.csv"
+
+
+def _read_archive(symbol: str, day: date_type):
+    p = _archive_path(symbol, day)
+    if not p.exists():
+        return None
+    return pd.read_csv(p, dtype=str).fillna("").values.tolist()
+
+
+def _write_archive(symbol: str, day: date_type, rows: list[list[str]]):
+    p = _archive_path(symbol, day)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame(rows, columns=_AUCTION_HEADER).to_csv(p, index=False, encoding="utf-8")
+
+
+def _auction_summary(symbol: str, pre_close, rows: list[list[str]]) -> dict:
+    seg1 = [r for r in rows if r[0] < "09:20:00"]
+    seg2 = [r for r in rows if "09:20:00" <= r[0] < "09:25:00"]
+    final = rows[-1] if rows else None
+    match_price = safe_num(float(final[1])) if final else None
+    match_vol = safe_num(float(final[2]), 0) if final else None
+
+    def _end(seg):
+        return (
+            {"price": safe_num(float(seg[-1][1])), "cum_vol": safe_num(float(seg[-1][2]), 0)}
+            if seg
+            else {"price": None, "cum_vol": None}
+        )
+
+    return {
+        "symbol": symbol,
+        "pre_close": safe_num(float(pre_close)) if pre_close else None,
+        "match_price": match_price,  # 09:25 撮合价 = 当日开盘价
+        "match_vol_hand": match_vol,  # 竞价匹配量（手，累计口径）
+        "est_match_amount_wan": safe_num(match_price * match_vol * 100 / 1e4)
+        if match_price and match_vol
+        else None,
+        "open_gap_pct": safe_num((match_price / float(pre_close) - 1) * 100, 2)
+        if match_price and pre_close
+        else None,
+        "track": {
+            "0915_0920": {**_end(seg1), "note": "可撤单段，假单噪音大"},
+            "0920_0925": {**_end(seg2), "note": "不可撤单，真实意愿段"},
+        },
+        "rows": len(rows),
+    }
+
+
+@RateLimiter(max_calls=10, time_window=60)
+@with_retry(max_retries=2, delay=1.0)
+def get_stock_auction(symbol: str, date: str = "", mode: str = "summary") -> str:
+    """查询个股集合竞价分时（9:15-9:25 虚拟撮合过程）
+
+    Args:
+        symbol: 6位股票代码
+        date: YYYY-MM-DD 默认今天。当日实时拉取并落盘归档；历史日期读 CSV 归档
+              （免费源仅当日可拉，无归档的历史无法回补）
+        mode: summary=三段轨迹+撮合统计 / detail=竞价段逐笔快照
+    """
+    try:
+        symbol = validate_stock_symbol(symbol)
+        if mode not in ("summary", "detail"):
+            return json_err('mode 仅支持 "summary"/"detail"')
+        day = parse_day(date)
+        if day is None:
+            return json_err(f"日期格式错误: {date}，请使用 YYYY-MM-DD")
+        pre_close, rows = None, _read_archive(symbol, day)
+        source = "archive"
+        if rows is None:
+            if day != datetime.now().date():
+                return json_err(f"{day} 无竞价归档（免费源仅当日可拉，历史无法回补）")
+            pre_close, details = _fetch_deal_details(symbol)
+            rows = _auction_rows(details)
+            if not rows:
+                return json_err(f"{symbol} 当日无竞价分笔数据(可能非交易日)")
+            _write_archive(symbol, day, rows)
+            source = "live"
+        out: dict = {"date": str(day), "source": source}
+        if mode == "detail":
+            out["items"] = [dict(zip(_AUCTION_HEADER, r)) for r in rows]
+            return json_ok(out)
+        if pre_close is None:
+            pre_close = _prev_close(symbol, day)  # 归档不含昨收，从日K补
+        out.update(_auction_summary(symbol, pre_close, rows))
+        return json_ok(out)
+    except Exception as e:  # noqa: BLE001
+        logger.error("Error in get_stock_auction: %s", e)
+        return json_err(f"查询竞价分时失败: {e}")
