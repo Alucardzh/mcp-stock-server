@@ -90,3 +90,27 @@ def test_get_lhb_seats_not_on_board(monkeypatch):
     )
     out = json.loads(lhb.get_lhb_seats("600825", "2026-09-02"))
     assert not out["success"]
+    assert "可能未上榜" in out["error"]
+
+
+def test_get_lhb_seats_invalid_symbol(monkeypatch):
+    """非法代码在进入数据源前即被校验拦截。"""
+    from utils import validate
+
+    monkeypatch.setattr(validate, "get_name_code_mapping", lambda: {})
+    out = json.loads(lhb.get_lhb_seats("600825x", "2026-09-02"))
+    assert not out["success"]
+    assert "查询席位明细失败" in out["error"]
+    assert "Invalid stock symbol" in out["error"]
+
+
+def test_get_lhb_seats_both_sides_raise_diagnosed(monkeypatch):
+    """买卖两侧都拉取异常时应报拉取失败，而非误诊为未上榜。"""
+    def _raise(symbol, date, flag):
+        raise RuntimeError("connection refused")
+
+    monkeypatch.setattr(lhb, "stock_lhb_stock_detail_em", _raise)
+    out = json.loads(lhb.get_lhb_seats("600825", "2026-09-02"))
+    assert not out["success"]
+    assert "拉取失败" in out["error"]
+    assert "可能未上榜" not in out["error"]

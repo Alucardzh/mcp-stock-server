@@ -13,6 +13,7 @@ from akshare import stock_lhb_detail_em, stock_lhb_stock_detail_em
 from .ef import ef_daily_billboard
 from .review_common import json_err, json_ok, parse_day, safe_num
 from .tools import RateLimiter, with_retry
+from .validate import validate_stock_symbol
 
 logger = logging.getLogger(__name__)
 
@@ -126,6 +127,7 @@ def get_lhb_seats(symbol: str, date: str = "") -> str:
         date: YYYY-MM-DD 默认今天。当日席位约17:00后陆续齐全，建议>=18:00查询
     """
     try:
+        symbol = validate_stock_symbol(symbol)
         day = parse_day(date)
         if day is None:
             return json_err(f"日期格式错误: {date}，请使用 YYYY-MM-DD")
@@ -163,7 +165,8 @@ def get_lhb_seats(symbol: str, date: str = "") -> str:
                 )
             sides[label] = seats
         if not sides:
-            return json_err(f"{symbol} 在 {day} 无龙虎榜席位明细(可能未上榜)")
+            detail = "; ".join(notes) if notes else "可能未上榜"
+            return json_err(f"{symbol} 在 {day} 无龙虎榜席位明细({detail})")
         return json_ok({"symbol": symbol, "date": str(day), **sides, "notes": notes})
     except Exception as e:  # noqa: BLE001
         logger.error("Error in get_lhb_seats: %s", e)

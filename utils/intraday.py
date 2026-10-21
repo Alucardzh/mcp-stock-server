@@ -8,14 +8,16 @@
 - push2 details/get 直连          当日分笔，含 9:15-9:25 竞价虚拟撮合过程
                                   （efinance 封装丢弃第5段方向字段，故直连）
 
-竞价归档：{AUCTION_ARCHIVE_ROOT}/{code}/{date}.csv。当日首次拉取落盘；
-历史日期只读归档（免费源无历史档，无法回补）。
+竞价归档：{AUCTION_ARCHIVE_ROOT}/{code}/{date}.csv。当日实时拉取仅当竞价完整
+（末行到 09:25 撮合行）才落盘，避免盘中半截快照冻结当日归档；历史日期只读归档
+（免费源无历史档，无法回补，归档不完整也作为最优可用数据返回）。
 """
 
 from datetime import date as date_type, datetime
 import logging
 import os
 from pathlib import Path
+import threading
 
 import pandas as pd
 import requests
@@ -221,6 +223,11 @@ def _auction_rows(details) -> list[list[str]]:
     return [d.split(",") for d in details if d[:5] <= "09:25"]
 
 
+def _auction_complete(rows) -> bool:
+    """竞价段是否完整（末行为 09:25:00 及以后的撮合行）"""
+    return bool(rows) and rows[-1][0] >= "09:25:00"
+
+
 def _archive_path(symbol: str, day: date_type) -> Path:
     return AUCTION_ARCHIVE_ROOT / symbol / f"{day}.csv"
 
@@ -232,10 +239,17 @@ def _read_archive(symbol: str, day: date_type):
     return pd.read_csv(p, dtype=str).fillna("").values.tolist()
 
 
+_archive_lock = threading.Lock()
+
+
 def _write_archive(symbol: str, day: date_type, rows: list[list[str]]):
+    """原子落盘：先写临时文件再替换，避免读归档方拿到半截 CSV。"""
     p = _archive_path(symbol, day)
     p.parent.mkdir(parents=True, exist_ok=True)
-    pd.DataFrame(rows, columns=_AUCTION_HEADER).to_csv(p, index=False, encoding="utf-8")
+    tmp = p.with_suffix(".csv.tmp")
+    with _archive_lock:
+        pd.DataFrame(rows, columns=_AUCTION_HEADER).to_csv(tmp, index=False, encoding="utf-8")
+        os.replace(tmp, p)
 
 
 def _auction_summary(symbol: str, pre_close, rows: list[list[str]]) -> dict:
@@ -278,8 +292,8 @@ def get_stock_auction(symbol: str, date: str = "", mode: str = "summary") -> str
 
     Args:
         symbol: 6位股票代码
-        date: YYYY-MM-DD 默认今天。当日实时拉取并落盘归档；历史日期读 CSV 归档
-              （免费源仅当日可拉，无归档的历史无法回补）
+        date: YYYY-MM-DD 默认今天。当日实时拉取、竞价完整(含09:25撮合行)才归档；
+              历史日期读 CSV 归档（免费源仅当日可拉，无归档的历史无法回补）
         mode: summary=三段轨迹+撮合统计 / detail=竞价段逐笔快照
     """
     try:
@@ -291,15 +305,19 @@ def get_stock_auction(symbol: str, date: str = "", mode: str = "summary") -> str
             return json_err(f"日期格式错误: {date}，请使用 YYYY-MM-DD")
         pre_close, rows = None, _read_archive(symbol, day)
         source = "archive"
+        today = datetime.now().date()
+        if rows is not None and day == today and not _auction_complete(rows):
+            rows = None  # 当日归档是盘中冻结的半截快照，不可信，改走实时
         if rows is None:
-            if day != datetime.now().date():
+            if day != today:
                 return json_err(f"{day} 无竞价归档（免费源仅当日可拉，历史无法回补）")
             pre_close, details = _fetch_deal_details(symbol)
             rows = _auction_rows(details)
             if not rows:
                 return json_err(f"{symbol} 当日无竞价分笔数据(可能非交易日)")
-            _write_archive(symbol, day, rows)
             source = "live"
+            if _auction_complete(rows):
+                _write_archive(symbol, day, rows)  # 仅完整竞价落盘，半截快照永不持久化
         out: dict = {"date": str(day), "source": source}
         if mode == "detail":
             out["items"] = [dict(zip(_AUCTION_HEADER, r)) for r in rows]

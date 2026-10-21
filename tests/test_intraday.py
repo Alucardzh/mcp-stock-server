@@ -1,5 +1,5 @@
 import json
-from datetime import date
+from datetime import date, datetime
 
 import pandas as pd
 import pytest
@@ -128,3 +128,76 @@ def test_auction_history_needs_archive(monkeypatch, tmp_path):
     out = json.loads(itd.get_stock_auction("600825", "2026-09-02"))
     assert not out["success"]
     assert "归档" in out["error"]
+
+
+def test_auction_partial_live_never_archived(monkeypatch, tmp_path):
+    """盘中半截快照（未到 09:25）永不落盘：每次调用都走 live。"""
+    monkeypatch.setattr(itd, "AUCTION_ARCHIVE_ROOT", tmp_path)
+    monkeypatch.setattr(
+        itd,
+        "_fetch_deal_details",
+        lambda s: ("10.0", ["09:15:00,10.1,9,0,4", "09:19:30,10.2,50,0,4", "09:21:00,10.3,80,0,4"]),
+    )
+    today = datetime.now().date()
+    out1 = json.loads(itd.get_stock_auction("600825", "", "summary"))
+    assert out1["success"]
+    assert out1["data"]["source"] == "live"
+    out2 = json.loads(itd.get_stock_auction("600825", "", "summary"))
+    assert out2["success"]
+    assert out2["data"]["source"] == "live"
+    assert not itd._archive_path("600825", today).exists()
+
+
+def test_auction_complete_fetch_archived(monkeypatch, tmp_path):
+    """完整竞价（末行 09:25:00）落盘，二次调用读归档。"""
+    monkeypatch.setattr(itd, "AUCTION_ARCHIVE_ROOT", tmp_path)
+    monkeypatch.setattr(
+        itd,
+        "_fetch_deal_details",
+        lambda s: ("10.0", ["09:15:00,10.1,9,0,4", "09:25:00,10.4,120,0,4"]),
+    )
+    today = datetime.now().date()
+    out1 = json.loads(itd.get_stock_auction("600825", "", "summary"))
+    assert out1["data"]["source"] == "live"
+    assert itd._archive_path("600825", today).exists()
+    out2 = json.loads(itd.get_stock_auction("600825", "", "detail"))
+    assert out2["data"]["source"] == "archive"
+    assert out2["data"]["items"][-1]["时间"] == "09:25:00"
+
+
+def test_auction_stale_partial_archive_ignored_for_today(monkeypatch, tmp_path):
+    """当日已存在的半截归档（旧版遗留）不得被当作最终结果冻结。"""
+    monkeypatch.setattr(itd, "AUCTION_ARCHIVE_ROOT", tmp_path)
+    today = datetime.now().date()
+    itd._write_archive("600825", today, [["09:15:00", "10.1", "9", "0", "4"], ["09:21:00", "10.3", "80", "0", "4"]])
+    monkeypatch.setattr(
+        itd,
+        "_fetch_deal_details",
+        lambda s: ("10.0", ["09:15:00,10.1,9,0,4", "09:25:00,10.4,120,0,4"]),
+    )
+    out = json.loads(itd.get_stock_auction("600825", "", "summary"))
+    assert out["data"]["source"] == "live"
+    assert out["data"]["match_price"] == 10.4  # 未被半截归档的 10.3 冻结
+    # 完整数据回写覆盖半截归档
+    rows = itd._read_archive("600825", today)
+    assert rows[-1][0] == "09:25:00"
+
+
+def test_auction_history_partial_archive_served(monkeypatch, tmp_path):
+    """历史日期的半截归档仍作为最优可用数据返回。"""
+    monkeypatch.setattr(itd, "AUCTION_ARCHIVE_ROOT", tmp_path)
+    itd._write_archive("600825", date(2026, 9, 2), [["09:15:00", "10.1", "9", "0", "4"]])
+    out = json.loads(itd.get_stock_auction("600825", "2026-09-02", "detail"))
+    assert out["success"]
+    assert out["data"]["source"] == "archive"
+    assert len(out["data"]["items"]) == 1
+
+
+def test_write_archive_atomic_no_tmp_leftover(monkeypatch, tmp_path):
+    """原子写：完成后目录中无 .tmp 残留。"""
+    monkeypatch.setattr(itd, "AUCTION_ARCHIVE_ROOT", tmp_path)
+    itd._write_archive("600825", date(2026, 9, 2), [["09:25:00", "10.4", "120", "0", "4"]])
+    p = itd._archive_path("600825", date(2026, 9, 2))
+    assert p.exists()
+    assert list(p.parent.glob("*.tmp")) == []
+    assert itd._read_archive("600825", date(2026, 9, 2))[0][1] == "10.4"
