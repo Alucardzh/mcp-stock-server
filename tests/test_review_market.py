@@ -1,3 +1,4 @@
+import json
 from datetime import date
 
 import pandas as pd
@@ -150,3 +151,25 @@ def test_get_zt_pool(monkeypatch):
 def test_get_zt_pool_bad_pool():
     out = rm.get_zt_pool(pool="飞天", date="2026-09-02")
     assert '"success": false' in out
+
+
+def test_get_zt_pool_seal_time_fields(monkeypatch):
+    df = _zt_df()
+    df["首次封板时间"] = ["092500", "093100"]
+    df["最后封板时间"] = ["145700", "100000"]
+    monkeypatch.setattr(rm, "stock_zt_pool_em", lambda date: df)
+    out = json.loads(rm.get_zt_pool("涨停", "2026-09-02"))
+    assert out["success"]
+    item = out["data"]["items"][0]
+    assert item["首次封板时间"] == "092500"
+    assert item["最后封板时间"] == "145700"
+
+
+def test_get_zt_pool_zhaban_first_seal_time(monkeypatch):
+    df = _zt_df().rename(columns={"封板资金": "x"})
+    df["首次封板时间"] = ["101500", "143000"]
+    monkeypatch.setattr(rm, "stock_zt_pool_zbgc_em", lambda date: df)
+    out = json.loads(rm.get_zt_pool("炸板", "2026-09-02"))
+    assert out["success"]
+    assert out["data"]["items"][0]["首次封板时间"] == "101500"
+    assert "最后封板时间" not in out["data"]["items"][0]
