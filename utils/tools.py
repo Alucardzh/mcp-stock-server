@@ -25,6 +25,7 @@ from urllib.error import URLError
 
 import akshare_proxy_patch
 import pandas as pd
+import requests
 
 akshare_proxy_patch.install_patch(
     "101.201.173.125",
@@ -41,11 +42,10 @@ akshare_proxy_patch.install_patch(
     fast=True
 )
 from akshare import (
-    stock_individual_info_em,
     stock_zh_index_spot_em,
 )
 
-from .ef import ef_spot_all, ef_stock_hist
+from .ef import ef_spot_all, ef_stock_base_info, ef_stock_hist
 from .support_resistance import calculate_support_resistance
 from .validate import (
     format_stock_data,
@@ -360,6 +360,43 @@ def get_stock_realtime(symbol: str) -> str:
         )
 
 
+def _num(v):
+    """numpy 标量转 Python 数值，None 透传。"""
+    if hasattr(v, "item"):
+        return v.item()
+    return v
+
+
+def _round2(v):
+    v = _num(v)
+    return round(v, 2) if isinstance(v, (int, float)) else v
+
+
+def _push2_stock_get(symbol: str) -> dict | None:
+    """push2 个股信息直连（requests 已被 akshare-proxy patch 接管，容器内自动走代理）。
+
+    直接从 JSON 的 data 字段取值，对上游新增顶层字段（如 dsc）免疫
+    （akshare stock_individual_info_em 因此类变更解析崩溃）。
+    """
+    params = {
+        "fltt": "2",
+        "invt": "2",
+        "fields": "f57,f58,f84,f85,f127,f116,f117,f189,f43",
+        "secid": f"{1 if symbol.startswith('6') else 0}.{symbol}",
+    }
+    try:
+        r = requests.get(
+            "https://push2.eastmoney.com/api/qt/stock/get",
+            params=params,
+            timeout=10,
+        )
+        data = r.json().get("data")
+        return data or None
+    except Exception as e:
+        logger.warning("push2 stock/get failed for %s: %s", symbol, e)
+        return None
+
+
 @RateLimiter(max_calls=30, time_window=60)
 @with_retry(max_retries=3, delay=1.0, backoff=2.0)
 def get_stock_basic(symbol: str) -> str:
@@ -371,37 +408,56 @@ def get_stock_basic(symbol: str) -> str:
     try:
         symbol = validate_stock_symbol(symbol)
         logger.info("Fetching basic info for %s", symbol)
-        # Fetch individual stock info from Akshare
-        data = stock_individual_info_em(symbol=symbol)
-        if data is None or data.empty:
+
+        # 主通道：efinance 个股基础信息（行业/市值/PE/PB/ROE 等）
+        try:
+            info = ef_stock_base_info(symbol)
+        except Exception as e:
+            logger.warning("efinance get_base_info failed for %s: %s", symbol, e)
+            info = None
+
+        # 补缺兼兜底通道：push2 直连（上市时间/总股本/流通股/最新价），
+        # 字段全集自洽，efinance 不可用时单独返回完整结果
+        raw = _push2_stock_get(symbol)
+
+        if info is None and raw is None:
             return json.dumps(
                 {"success": False, "error": f"No basic data found for symbol {symbol}"},
                 ensure_ascii=False,
                 indent=2,
             )
-        # # Fetch data from Akshare
-        info_dict = {}
-        if len(data) >= 2:  # Usually has two columns: item and value
-            for _, row in data.iterrows():
-                if len(row) >= 2:
-                    key = str(row.iloc[0]).strip()
-                    value = row.iloc[1]
-                    info_dict[key] = value
-        # Extract relevant information (matching Chinese field names from akshare)
-        # Common field names: 股票代码, 股票简称, 总股本, 流通股, 行业, 上市时间
+        raw = raw or {}
+
+        def pick(info_key, raw_field, default=None):
+            if info is not None and info.get(info_key) is not None:
+                return info[info_key]
+            return default if raw.get(raw_field) is None else raw[raw_field]
+
+        list_date = _num(raw.get("f189"))
+        if isinstance(list_date, (int, float)) and list_date:
+            date_str = f"{int(list_date):08d}"
+            list_date = f"{date_str[:4]}-{date_str[4:6]}-{date_str[6:]}"
+
         result = {
             "success": True,
             "data": {
-                "symbol": str(info_dict.get("股票代码", symbol)),
-                "name": str(info_dict.get("股票简称", "Unknown")),
-                "industry": str(info_dict.get("行业", "Unknown")),
-                "list_date": str(info_dict.get("上市时间", "Unknown")),
-                "total_shares": info_dict.get("总股本", None),
-                "circulating_shares": info_dict.get("流通股", None),
-                "total_market_value": info_dict.get("总市值", None),
-                "circulating_market_value": info_dict.get("流通市值", None),
-                "current_price": info_dict.get("最新价", None),
-                "source": "akshare",
+                "symbol": str(pick("股票代码", "f57", symbol)),
+                "name": str(pick("股票名称", "f58", "Unknown")),
+                "industry": str(pick("所处行业", "f127", "Unknown")),
+                "list_date": list_date or "Unknown",
+                "total_shares": (
+                    int(_num(raw["f84"])) if raw.get("f84") is not None else None
+                ),
+                "circulating_shares": (
+                    int(_num(raw["f85"])) if raw.get("f85") is not None else None
+                ),
+                "total_market_value": _round2(pick("总市值", "f116")),
+                "circulating_market_value": _round2(pick("流通市值", "f117")),
+                "current_price": _num(raw.get("f43")),
+                "pe_dynamic": _round2(info.get("市盈率(动)")) if info else None,
+                "pb": _round2(info.get("市净率")) if info else None,
+                "roe": _round2(info.get("ROE")) if info else None,
+                "source": "efinance+push2" if info else "push2",
             },
         }
         return json.dumps(result, ensure_ascii=False, indent=2)

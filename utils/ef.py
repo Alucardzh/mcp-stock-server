@@ -8,7 +8,8 @@
 - ef_spot_all   ≈ akshare.stock_zh_a_spot_em  沪深京全市场快照
 
 刻意不替换的接口（efinance 无等价或字段缺失）：
-- stock_individual_info_em：efinance get_base_info 缺上市时间/总股本/流通股
+- stock_individual_info_em：efinance get_base_info 缺上市时间/总股本/流通股，
+  get_stock_basic 改走 ef_stock_base_info 主通道 + push2 直连补缺（见 tools.py）
 - stock_zh_index_spot_em / index_zh_a_hist：efinance 不支持指数代码
 """
 
@@ -84,6 +85,23 @@ def ef_spot_all() -> pd.DataFrame:
     ef = _load_ef()
     df = ef.stock.get_realtime_quotes()
     return df.rename(columns=_SPOT_RENAME)
+
+
+def ef_stock_base_info(symbol: str) -> dict:
+    """个股基础信息（efinance get_base_info 单代码通道）。
+
+    返回键：股票代码/股票名称/所处行业/总市值/流通市值/市盈率(动)/市净率/ROE/
+    净利率/净利润/毛利率，numpy 标量已转 Python 数值。
+    缺 上市时间/总股本/流通股/最新价，由调用方用 push2 stock/get 直连补齐。
+    """
+    import efinance.stock.getter as _stock_getter  # get_base_info_single 未从包根导出
+
+    _load_ef()
+    series = _stock_getter.get_base_info_single(symbol)
+    return {
+        str(k): (v.item() if hasattr(v, "item") else v)
+        for k, v in series.items()
+    }
 
 
 _ETF_SPOT_RENAME = {
