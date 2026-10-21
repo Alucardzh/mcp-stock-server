@@ -24,6 +24,7 @@ from utils import (
     get_global_linkage_review,
     get_global_markets,
     get_index_derivatives,
+    get_lhb,
     get_margin,
     get_market_breadth,
     get_market_index,
@@ -299,6 +300,16 @@ def get_stock_boards_tool(symbol: str, with_raw: bool = False) -> str:
         with_raw: 是否附带原始全部所属板块（含地域/属性板块）
     """
     return get_stock_boards(symbol, with_raw)
+
+
+@mcp.tool()
+def get_lhb_tool(date: str = "") -> str:
+    """查询龙虎榜榜单（按股聚合净买卖亿元、上榜原因、东财解读；净买TOP10/净卖TOP5）
+
+    Args:
+        date: YYYY-MM-DD 默认今天；当日榜单约17:00后陆续齐全
+    """
+    return get_lhb(date)
 
 
 @mcp.tool()

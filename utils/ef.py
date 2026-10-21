@@ -129,3 +129,9 @@ def ef_etf_spot() -> pd.DataFrame:
     ef = _load_ef()
     df = ef.stock.get_realtime_quotes(["ETF"])
     return df.rename(columns=_ETF_SPOT_RENAME)
+
+
+def ef_daily_billboard(start_date: str, end_date: str) -> pd.DataFrame:
+    """东财龙虎榜榜单（date 区间，'YYYY-MM-DD'）。"""
+    ef = _load_ef()
+    return ef.stock.get_daily_billboard(start_date=start_date, end_date=end_date)

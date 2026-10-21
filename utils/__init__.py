@@ -26,6 +26,7 @@ from .global_stocks import get_stock_global_snapshot
 from .global_linkage import get_global_linkage_review
 from .intraday import get_stock_auction, get_stock_intraday
 from .boards import get_stock_boards
+from .lhb import get_lhb
 
 __all__ = [
     "get_etf_daily",
@@ -50,4 +51,5 @@ __all__ = [
     "get_stock_intraday",
     "get_stock_auction",
     "get_stock_boards",
+    "get_lhb",
 ]
