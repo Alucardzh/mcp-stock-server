@@ -266,14 +266,32 @@ result = await client.call_tool("get_stock_realtime_tool", {
 
 ```txt
 mcp-stock-server/
-├── server.py          # 主服务器文件
-├── utils/             # 数据获取与分析模块
+├── server.py          # 入口（实例运行；工具不在本文件注册）
+├── mcp_app.py         # FastMCP 实例 + instructions（LLM 可见的分类导航）
+├── mcp_tools/         # 工具注册层（按领域分类，导入即注册）
+│   ├── meta.py           # 服务器元工具（list_tools / akproxy额度）
+│   ├── stock.py          # 个股（行情/基础/分钟分时/竞价/板块/支撑阻力/热度榜）
+│   ├── review.py         # 复盘（一键复盘/涨跌结构/涨停生态/指数）
+│   ├── lhb.py            # 龙虎榜（榜单/席位）
+│   ├── funds.py          # 资金面（主力资金/两融/ETF）
+│   ├── derivatives.py    # 衍生品（中金所席位/基差PCR/美债利差）
+│   ├── global_markets.py # 全球（六组快照/隔夜共振/海外个股链）
+│   └── prompts.py        # 分析师 prompts
+├── utils/             # 数据获取与分析模块（真实逻辑所在，注册层只做透传）
+├── scripts/           # 冒烟脚本
 ├── pyproject.toml     # 项目配置
 ├── env.template       # 环境变量模板
 ├── docker-compose.yml # Docker Compose 配置
 ├── Dockerfile         # 容器构建文件
 └── README.md          # 项目文档
 ```
+
+### 新增/修改工具
+
+1. 业务逻辑写在 `utils/`（数据通道选型遵循 efinance 优先：efinance 有封装的走 `utils/ef.py`，akshare 独有的模块级导入便于测试 monkeypatch）。
+2. 在 `mcp_tools/` 对应分类模块加一个 `@mcp.tool()` 薄透传函数（命名 `*_tool` 后缀，docstring 中文）。
+3. 新分类才需要：建文件 + 在 `mcp_tools/__init__.py` 加一行导入；并同步 `mcp_app.py` 的 SERVER_INSTRUCTIONS 导航。
+4. 若新增顶层文件/目录，记得 `Dockerfile` 加对应 `COPY` 行。
 
 ### 依赖
 

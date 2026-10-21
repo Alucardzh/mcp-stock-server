@@ -9,7 +9,8 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 # 复制项目文件（uv.lock 必须带上：否则镜像内 uv sync 会解析最新版依赖，
 # 与本地锁定验证过的版本不一致，导致行为漂移）
 COPY pyproject.toml uv.lock ./
-COPY server.py .
+COPY server.py mcp_app.py ./
+COPY mcp_tools/ ./mcp_tools/
 COPY utils/ ./utils/
 COPY scripts/ ./scripts/
 COPY README.md .
