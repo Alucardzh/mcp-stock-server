@@ -247,6 +247,10 @@ cp env.template .env
 
 查询龙虎榜榜单（efinance 主 / akshare 备）。按股聚合净买/卖（亿元）、上榜原因、东财解读，附净买 TOP10 / 净卖 TOP5 摘要。
 
+### `get_lhb_seats_tool`
+
+查询个股龙虎榜席位明细（akshare 东财数据源，买/卖前 5 席位，金额万元，带机构/外资/游资分类）。当日数据建议 18:00 后查询。
+
 ## 使用示例
 
 ```python

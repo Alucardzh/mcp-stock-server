@@ -25,6 +25,7 @@ from utils import (
     get_global_markets,
     get_index_derivatives,
     get_lhb,
+    get_lhb_seats,
     get_margin,
     get_market_breadth,
     get_market_index,
@@ -310,6 +311,17 @@ def get_lhb_tool(date: str = "") -> str:
         date: YYYY-MM-DD 默认今天；当日榜单约17:00后陆续齐全
     """
     return get_lhb(date)
+
+
+@mcp.tool()
+def get_lhb_seats_tool(symbol: str, date: str = "") -> str:
+    """查询个股龙虎榜席位明细（买/卖前5，万元，机构/外资/游资分类）
+
+    Args:
+        symbol: 6位股票代码
+        date: YYYY-MM-DD 默认今天；当日席位>=18:00才齐全
+    """
+    return get_lhb_seats(symbol, date)
 
 
 @mcp.tool()

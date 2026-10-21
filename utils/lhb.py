@@ -106,3 +106,65 @@ def get_lhb(date: str = "") -> str:
     except Exception as e:  # noqa: BLE001
         logger.error("Error in get_lhb: %s", e)
         return json_err(f"查询龙虎榜失败: {e}")
+
+
+def _classify_seat(name: str) -> str:
+    if "机构专用" in name:
+        return "[机构]"
+    if "股通专用" in name:
+        return "[外资]"
+    return "[游资]"
+
+
+@RateLimiter(max_calls=10, time_window=60)
+@with_retry(max_retries=2, delay=1.0)
+def get_lhb_seats(symbol: str, date: str = "") -> str:
+    """查询个股龙虎榜席位明细（买/卖前5；金额万元，带机构/外资/游资分类）
+
+    Args:
+        symbol: 6位股票代码
+        date: YYYY-MM-DD 默认今天。当日席位约17:00后陆续齐全，建议>=18:00查询
+    """
+    try:
+        day = parse_day(date)
+        if day is None:
+            return json_err(f"日期格式错误: {date}，请使用 YYYY-MM-DD")
+        d_compact = day.strftime("%Y%m%d")
+        sides, notes = {}, []
+        for flag, label in (("买入", "buy"), ("卖出", "sell")):
+            try:
+                df = stock_lhb_stock_detail_em(symbol=symbol, date=d_compact, flag=flag)
+            except Exception as e:  # noqa: BLE001
+                notes.append(f"{flag}方席位拉取失败: {e}")
+                continue
+            if df is None or df.empty:
+                continue
+            exact = "买入金额" if flag == "买入" else "卖出金额"
+            amt_col = exact if exact in df.columns else next(
+                (c for c in df.columns if "金额" in str(c)), None
+            )
+            name_col = "营业部名称" if "营业部名称" in df.columns else next(
+                (c for c in df.columns if "营业部" in str(c)
+                 or "OPERATEDEPT" in str(c).upper()), None
+            )
+            if amt_col is None or name_col is None:
+                notes.append(f"{flag}方席位列结构异常: {list(df.columns)}")
+                continue
+            seats = []
+            for _, r in df.head(5).iterrows():
+                nm = str(r[name_col] or "?")
+                seats.append(
+                    {
+                        "seat": _classify_seat(nm) + nm,
+                        "amount_wan": safe_num(
+                            pd.to_numeric(r[amt_col], errors="coerce") / 1e4, 0
+                        ),
+                    }
+                )
+            sides[label] = seats
+        if not sides:
+            return json_err(f"{symbol} 在 {day} 无龙虎榜席位明细(可能未上榜)")
+        return json_ok({"symbol": symbol, "date": str(day), **sides, "notes": notes})
+    except Exception as e:  # noqa: BLE001
+        logger.error("Error in get_lhb_seats: %s", e)
+        return json_err(f"查询席位明细失败: {e}")

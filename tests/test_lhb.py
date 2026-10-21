@@ -59,3 +59,34 @@ def test_get_lhb_no_data(monkeypatch):
     monkeypatch.setattr(lhb, "stock_lhb_detail_em", lambda start_date, end_date: pd.DataFrame())
     out = json.loads(lhb.get_lhb("2026-09-02"))
     assert not out["success"]
+
+
+def _seats_df(flag):
+    amt_col = "买入金额" if flag == "买入" else "卖出金额"
+    return pd.DataFrame(
+        {
+            "营业部名称": ["机构专用", "沪股通专用", "中信证券上海分公司", "华鑫上海分公司", "东财拉萨团结路"],
+            amt_col: [5.0e7, 3.0e7, 2.0e7, 1.0e7, 0.5e7],
+        }
+    )
+
+
+def test_get_lhb_seats(monkeypatch):
+    monkeypatch.setattr(
+        lhb, "stock_lhb_stock_detail_em", lambda symbol, date, flag: _seats_df(flag)
+    )
+    out = json.loads(lhb.get_lhb_seats("600825", "2026-09-02"))
+    assert out["success"]
+    d = out["data"]
+    assert d["buy"][0]["seat"].startswith("[机构]")
+    assert d["buy"][0]["amount_wan"] == 5000.0
+    assert d["buy"][1]["seat"].startswith("[外资]")
+    assert d["sell"][0]["amount_wan"] == 5000.0
+
+
+def test_get_lhb_seats_not_on_board(monkeypatch):
+    monkeypatch.setattr(
+        lhb, "stock_lhb_stock_detail_em", lambda symbol, date, flag: pd.DataFrame()
+    )
+    out = json.loads(lhb.get_lhb_seats("600825", "2026-09-02"))
+    assert not out["success"]
