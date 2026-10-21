@@ -2,7 +2,7 @@
 
 - 日期：2026-10-20
 - 状态：草案（待用户确认）
-- 范围：StockMCP 新增/增强 6 项数据能力（复盘四缺口 + 竞价分时 + 龙虎榜收编）；跨项目触点：DailyReview cron 竞价归档
+- 范围：StockMCP 新增/增强 6 项数据能力（复盘四缺口 + 竞价分时 + 龙虎榜收编）+ 内建竞价 CSV 归档
 
 ## 1. 背景与评估结论（2026-10-20 实测）
 
@@ -44,13 +44,15 @@
 - full：全量分钟 bar（1min 为 240 行），文档警示 token 占用。
 - 实现：`utils/ef.py` 的 `_KLT_MAP` 补分钟档 `{"1":1,"5":5,"15":15,"30":30,"60":60}`；主 ef 备 akshare（沿用 etf 双通道模式）。
 
-### 3.3 `get_stock_auction_tool`（新，竞价分时，当日，P1）
+### 3.3 `get_stock_auction_tool`（新，竞价分时，P1）
 
-- 参数：`symbol`、`mode=summary|detail`（默认 summary）。
+- 参数：`symbol`、`date`（默认当日）、`mode=summary|detail`（默认 summary）。
 - 主通道：ef `get_deal_detail` → 切 9:15-9:25 段。
 - summary 输出：昨收（prePrice）、竞价撮合价、竞价量/额、高开幅度、9:15/9:20/9:25 三档价格轨迹（各段末价格+累计匹配量）、9:20-9:25 真实意愿段标注（9:20 前可撤单，假单噪音大）。
 - detail：竞价段逐笔快照（几十~几百行）。
-- 仅当日；历史归档见 §6。
+- 日期语义（读写穿透归档，见 §6）：
+  - `date=当日` → 实时拉取 + 落盘 CSV 归档；
+  - `date=历史日` → 读本地归档 CSV，无归档则报错说明（免费源无档，无法回补）。
 
 ### 3.4 `get_stock_boards_tool`（新，行业+概念，P1）
 
@@ -75,18 +77,23 @@
 ## 4. 基建变更
 
 - `utils/tools.py` 的 `install_patch` hook_domains += `datacenter-web.eastmoney.com`（仅席位需要；**前置冒烟：akproxy 是否放行**，不放行则席位走裸 URL+显式代理，hook 不加）。
+- docker-compose 加 volume 挂载（竞价归档持久化，见 §6），归档根路径经 env `AUCTION_ARCHIVE_ROOT` 可配（默认 `/app/data/auction`）。
 - README 工具列表补 5 个新工具条目。
-- 不引入数据库与调度器，沿用平铺模块 + 无状态实时拉取。
+- 不引入数据库与调度器，沿用平铺模块 + 无状态实时拉取（竞价归档是唯一的本地状态，纯文件）。
 
 ## 5. 部署
 
-- 本机 `docker build` + `push docker.sihanfu.cn:15999/mcp-stock-server:latest`；用户在远程 `docker compose pull && up -d`。
+- 本机 `docker build` + `push docker.sihanfu.cn:15999/mcp-stock-server:latest`；用户在远程 `docker compose pull && up -d`（新 volume 挂载随 compose 生效，宿主机目录自动创建）。
 - 旧镜像"只出当日"问题随之消除；部署后回归：`list_tools`、`get_zt_pool(date=历史)`、新工具各一次冒烟。
 
-## 6. 竞价历史归档（跨项目，DailyReview cron）
+## 6. 竞价历史归档（StockMCP 内建，CSV）
 
-- 盘后 cron 对池内/关注股调 `get_stock_auction_tool(mode=summary)`，落盘 JSON（键：日期+代码）。
-- 从上线日起积累；更早历史无法回补。落盘逻辑在 DailyReview 侧实现，StockMCP 只保证工具稳定。
+- 归档机制内建在 `get_stock_auction_tool`（读写穿透）：当日首次拉取即落盘；历史查询直接读盘，省去重复请求。与 DailyReview 无关。
+- 目录形式：`{AUCTION_ARCHIVE_ROOT}/{code}/{date}.csv`，每股一个目录、每日一个文件。
+- CSV 列（details/get 原始五段透传，无加工）：`时间,价格,成交量,单数,方向`。昨收等元数据不落盘，需要时从日 K 补（历史恒可查）。
+- 持久化：docker-compose 挂 volume（`./data/auction:/app/data/auction`），容器重建不丢档。
+- 上线日起积累；更早历史无法回补。
+- YAGNI：先不做查询/聚合层，仅为当下反复查询节约时间。
 
 ## 7. 通达信调研结论（2026-10-20 实测）
 
