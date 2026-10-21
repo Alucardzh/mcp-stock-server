@@ -239,6 +239,10 @@ cp env.template .env
 
 查询个股集合竞价分时（9:15-9:25 虚拟撮合过程，仅当日可拉取）。当日首次查询即落盘 CSV 归档（`data/auction/{code}/{date}.csv`），历史日期读归档。`mode=summary` 返回 9:15/9:20/9:25 三段轨迹、撮合价量、高开幅度；`mode=detail` 返回逐笔快照。
 
+### `get_stock_boards_tool`
+
+查询个股完整行业名与概念板块列表（efinance 所属板块 + 概念名单过滤）。用于复盘模块⑦题材聚类的完整口径，替代涨停池 4 字截断行业。
+
 ## 使用示例
 
 ```python

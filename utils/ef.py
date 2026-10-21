@@ -90,6 +90,12 @@ def ef_spot_all() -> pd.DataFrame:
     return df.rename(columns=_SPOT_RENAME)
 
 
+def ef_belong_board(symbol: str) -> pd.DataFrame:
+    """个股所属板块（行业+概念+地域+属性混合，调用方负责过滤）。"""
+    ef = _load_ef()
+    return ef.stock.get_belong_board(symbol)
+
+
 def ef_stock_base_info(symbol: str) -> dict:
     """个股基础信息（efinance get_base_info 单代码通道）。
 
