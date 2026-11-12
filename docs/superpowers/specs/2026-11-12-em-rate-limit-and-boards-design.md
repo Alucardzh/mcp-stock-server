@@ -86,6 +86,21 @@ def em_push2_get(path: str, params: dict, *, cache_ttl: float | None = None) -> 
 **`limit_up`（板块内涨停家数）**：clist 无现成字段。从涨停全量池按 `所属行业`
 **前缀匹配**（容忍池内 4 字截断名）计算，算不出则省略字段，响应不报错。
 
+**实现期实测修正（2026-11-12 探测，详见 §5 验收实测）**：
+
+1. **clist 单页硬上限 100 条，`pz=600` 被无视**（概念板块 total=531）。
+   实现为分页拉取（`pz=100` × `pn=1..N`，短页即停，上限 8 页）后合并进同一快照。
+2. **ulist 对板块 secid 的 f46/f60 返回 `"-"` 占位**（不可用），自动退化逐板块
+   `stock/get`（进程内 `ulist_ok=False` 记忆）。
+3. **板块开盘价刻度**：clist f17/f18 与 stock/get f46/f60 实测返回**同一非标刻度**
+   （如元件 f46=49405.61，无 49.x 通道；需求文档示例的 49.4056 是文档作者
+   对原始值 ÷100000 的假设）。`open_pct` 为比值，刻度无关，两通道实测精确一致。
+   R1 的 `open/prev_close` 以 stock/get 原值透传；R2 行内 `open_pct` 用 clist 比值，
+   无真实单板块值时 `open/prev_close` 置 null。
+4. **盘前防护**：当缺开盘价的板块过多（>20，如开盘前 f17 全为 `-`），
+   R2 跳过批量开盘价请求，`open_pct` 用 clist 比值口径并附 note，
+   避免逐板块 stock/get × 1.5s pacing 的分钟级扇出。
+
 ### 3.3 `mcp_tools/boards.py`（新增分类模块）
 
 **`get_board_quote_tool(board_code: str = "", board_name: str = "")`**（R1，最高优先）
@@ -101,8 +116,9 @@ def em_push2_get(path: str, params: dict, *, cache_ttl: float | None = None) -> 
 **`get_boards_tool(scope="行业", sort="main_net", limit=20, with_open=true)`**（R2）
 
 - `scope`: `行业`/`概念`；`sort`: `main_net`/`chg`/`open_pct`；`limit ≤ 50`。
-- `with_open=false` 时跳过 ulist 请求（省一次上游调用）。
-- 板块清单接口失败：整个列表 `unavailable`；仅 ulist 失败：返回列表 + note「开盘涨跌幅不可用」。
+- `with_open=false` 时跳过开盘价请求（省上游调用；open_pct 仍可用 clist f17/f18 比值）。
+- 板块清单接口失败：整个列表 `unavailable`；仅开盘价获取失败：返回列表 + note
+  （`open_pct` 退化为 clist 比值口径）。
 
 ### 3.4 `utils/review_market.py` 改造（R3）
 
