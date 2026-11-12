@@ -22,7 +22,9 @@ def safe_num(value, ndigits: int = 2):
 
 def _sanitize(value):
     """NaN/Infinity -> None（json.dumps 默认输出 NaN/Infinity 非法 JSON，严格解析器会拒绝）"""
-    if isinstance(value, float) and (value != value or value in (float("inf"), float("-inf"))):
+    if isinstance(value, float) and (
+        value != value or value in (float("inf"), float("-inf"))
+    ):
         return None
     if isinstance(value, dict):
         return {k: _sanitize(v) for k, v in value.items()}
@@ -32,7 +34,9 @@ def _sanitize(value):
 
 
 def json_ok(data) -> str:
-    return json.dumps({"success": True, "data": _sanitize(data)}, ensure_ascii=False, indent=2)
+    return json.dumps(
+        {"success": True, "data": _sanitize(data)}, ensure_ascii=False, indent=2
+    )
 
 
 def json_err(msg: str) -> str:
@@ -76,3 +80,24 @@ def col_like(df, keyword: str) -> str | None:
         if keyword in str(c):
             return c
     return None
+
+
+def json_unavailable(reason: str) -> str:
+    """上游不可用（限流/接口失败）：data=null + status/reason，与业务错误区分。
+
+    上层必须把该形态当「缺数据」而非「条件不达标」处理（设计文档 §4）。
+    """
+    return json.dumps(
+        {"success": True, "data": None, "status": "unavailable", "reason": reason},
+        ensure_ascii=False,
+        indent=2,
+    )
+
+
+def json_err_code(code: str, msg: str) -> str:
+    """业务错误（客户端不可重试类），带机器可读 error_code。"""
+    return json.dumps(
+        {"success": False, "error": msg, "error_code": code},
+        ensure_ascii=False,
+        indent=2,
+    )

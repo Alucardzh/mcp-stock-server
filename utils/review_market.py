@@ -27,6 +27,8 @@ from akshare import (
 )
 
 from .ef import ef_spot_all
+from .push2_client import CACHE as PUSH2_CACHE
+from .push2_client import EmResult, now_iso
 from .review_common import json_err, json_ok, parse_day, prev_trading_days, safe_num
 from .tools import CachedData, RateLimiter, with_retry
 
@@ -41,6 +43,44 @@ REVIEW_INDEXES = [
 ]
 
 MAX_POOL_ROWS = 60
+
+POOL_CACHE_TTL_TODAY = 60  # 当日三池缓存（秒）
+POOL_CACHE_TTL_HISTORY = 600  # 历史日期三池缓存（数据不变，放宽）
+
+
+def _pool_ttl(day: date_type) -> int:
+    return (
+        POOL_CACHE_TTL_TODAY if day == datetime.now().date() else POOL_CACHE_TTL_HISTORY
+    )
+
+
+def _pool_cached(pool: str, day: date_type):
+    """三池 DataFrame 缓存（single-flight；拉取失败不写缓存，stale 降级）。
+
+    akshare push2ex 直连不经 push2_client pacing（不同限流桶），仅复用缓存层。
+    空数据不缓存：可能是非交易日，也可能是拉取失败（_pool_rows 内部已吞异常）。
+    「拉到但为空」的 DataFrame 原样透传（不写缓存），保持 breadth 的
+    zhaban/limit_down=0 语义；「拉取失败」返回 None。
+    返回 (df|None, as_of, cached, stale)。
+    """
+    fetched_empty: list[pd.DataFrame] = []
+
+    def _fetch() -> EmResult:
+        df = _pool_rows(pool, day)
+        if df is None or df.empty:
+            if df is not None:
+                fetched_empty.append(df)
+            return EmResult(ok=False, reason="upstream_error")
+        return EmResult(ok=True, data=df, as_of=now_iso())
+
+    res = PUSH2_CACHE.get(f"pool:{pool}:{day}", _pool_ttl(day), _fetch)
+    if res.ok:
+        return res.data, res.as_of, res.cached, res.stale
+    if fetched_empty:
+        # 本轮拉取成功但为空：ok=False 未写缓存，空 df 直接透传（每次现拉）
+        return fetched_empty[-1], "", False, False
+    return None, "", False, False
+
 
 _spot_cache: CachedData | None = None
 
@@ -101,16 +141,68 @@ POOL_FETCHERS = {
 MONEY_FIELDS = {"成交额", "封板资金", "封单资金", "板上成交额", "流通市值", "总市值"}
 
 _POOL_FIELDS = {
-    "涨停": ["代码", "名称", "涨跌幅", "最新价", "成交额", "换手率", "封板资金",
-             "首次封板时间", "最后封板时间", "炸板次数", "涨停统计", "连板数", "所属行业"],
-    "炸板": ["代码", "名称", "涨跌幅", "最新价", "成交额", "换手率", "首次封板时间",
-             "炸板次数", "涨停统计", "所属行业"],
-    "跌停": ["代码", "名称", "涨跌幅", "最新价", "成交额", "换手率", "封单资金",
-             "板上成交额", "连续跌停", "开板次数", "所属行业"],
-    "强势": ["代码", "名称", "涨跌幅", "最新价", "成交额", "换手率", "涨停统计",
-             "连板数", "所属行业"],
-    "昨涨停": ["代码", "名称", "涨跌幅", "最新价", "成交额", "换手率", "涨停统计",
-               "连板数", "所属行业"],
+    "涨停": [
+        "代码",
+        "名称",
+        "涨跌幅",
+        "最新价",
+        "成交额",
+        "换手率",
+        "封板资金",
+        "首次封板时间",
+        "最后封板时间",
+        "炸板次数",
+        "涨停统计",
+        "连板数",
+        "所属行业",
+    ],
+    "炸板": [
+        "代码",
+        "名称",
+        "涨跌幅",
+        "最新价",
+        "成交额",
+        "换手率",
+        "首次封板时间",
+        "炸板次数",
+        "涨停统计",
+        "所属行业",
+    ],
+    "跌停": [
+        "代码",
+        "名称",
+        "涨跌幅",
+        "最新价",
+        "成交额",
+        "换手率",
+        "封单资金",
+        "板上成交额",
+        "连续跌停",
+        "开板次数",
+        "所属行业",
+    ],
+    "强势": [
+        "代码",
+        "名称",
+        "涨跌幅",
+        "最新价",
+        "成交额",
+        "换手率",
+        "涨停统计",
+        "连板数",
+        "所属行业",
+    ],
+    "昨涨停": [
+        "代码",
+        "名称",
+        "涨跌幅",
+        "最新价",
+        "成交额",
+        "换手率",
+        "涨停统计",
+        "连板数",
+        "所属行业",
+    ],
 }
 
 
@@ -125,15 +217,16 @@ def _pool_rows(pool: str, day: date_type) -> pd.DataFrame | None:
 
 def _pool_with_fallback(
     pool: str, day: date_type
-) -> tuple[pd.DataFrame | None, date_type, list[str]]:
+) -> tuple[pd.DataFrame | None, date_type, list[str], str, bool, bool]:
+    """(df, actual_day, notes, as_of, cached, stale)；无数据时 df=None。"""
     notes = []
     for d in [day, *prev_trading_days(day, 5)]:
-        df = _pool_rows(pool, d)
+        df, as_of, cached, stale = _pool_cached(pool, d)
         if df is not None and not df.empty:
             if d != day:
                 notes.append(f"{day} 无数据，返回最近交易日 {d} 的{pool}股池")
-            return df, d, notes
-    return None, day, notes
+            return df, d, notes, as_of, cached, stale
+    return None, day, notes, "", False, False
 
 
 def breadth_section(day: date_type) -> dict:
@@ -150,7 +243,7 @@ def breadth_section(day: date_type) -> dict:
         "max_lianban": None,
         "lianban_dist": None,
     }
-    zt = _pool_rows("涨停", day)
+    zt = _pool_cached("涨停", day)[0]
     if zt is None or zt.empty:
         notes.append(f"{day} 无涨停池数据(可能非交易日)")
     else:
@@ -158,12 +251,10 @@ def breadth_section(day: date_type) -> dict:
         lianban = pd.to_numeric(zt.get("连板数"), errors="coerce")
         out["max_lianban"] = int(lianban.max()) if lianban.notna().any() else 0
         out["lianban_dist"] = {
-            f"{int(k)}板": int(v)
-            for k, v in lianban.value_counts().items()
-            if k >= 2
+            f"{int(k)}板": int(v) for k, v in lianban.value_counts().items() if k >= 2
         }
     for key, pool in (("zhaban", "炸板"), ("limit_down", "跌停")):
-        df = _pool_rows(pool, day)
+        df = _pool_cached(pool, day)[0]
         if df is not None:
             out[key] = 0 if df.empty else len(df)
     if day == datetime.now().date():
@@ -204,13 +295,14 @@ def get_market_breadth(date: str = "") -> str:
 
 
 @RateLimiter(max_calls=10, time_window=60)
-@with_retry(max_retries=3, delay=1.0, backoff=2.0)
-def get_zt_pool(pool: str = "涨停", date: str = "") -> str:
+def get_zt_pool(pool: str = "涨停", date: str = "", full: bool = False) -> str:
     """查询涨停生态股池明细（金额字段单位: 亿元）
 
     Args:
         pool: 涨停/炸板/跌停/强势/昨涨停，默认"涨停"
         date: 查询日期 YYYY-MM-DD，默认今天；无数据时自动回退最近交易日
+        full: 默认 false 截断前 60 条（count 仍为全量家数）；true 返回全量行，
+              链强度/炸板率/晋级率/连板梯队必须用全量
     """
     try:
         day = parse_day(date)
@@ -219,12 +311,12 @@ def get_zt_pool(pool: str = "涨停", date: str = "") -> str:
         key = (pool or "").strip()
         if key not in POOL_FETCHERS:
             return json_err(f"pool 仅支持 {'/'.join(POOL_FETCHERS)}，当前: {pool}")
-        df, actual_day, notes = _pool_with_fallback(key, day)
+        df, actual_day, notes, as_of, cached, stale = _pool_with_fallback(key, day)
         if df is None or df.empty:
             return json_err(f"{day} 前后数个交易日内无{key}股池数据")
         fields = [c for c in _POOL_FIELDS[key] if c in df.columns]
         rows = []
-        for _, r in df.head(MAX_POOL_ROWS).iterrows():
+        for _, r in (df if full else df.head(MAX_POOL_ROWS)).iterrows():
             row = {}
             for c in fields:
                 if c in MONEY_FIELDS:
@@ -241,8 +333,28 @@ def get_zt_pool(pool: str = "涨停", date: str = "") -> str:
                 "count": len(df),
                 "items": rows,
                 "notes": notes,
+                "as_of": as_of,
+                "stale": stale,
+                "cached": cached,
+                "source": "eastmoney_push2ex",
             }
         )
     except Exception as e:  # noqa: BLE001
         logger.error("Error in get_zt_pool: %s", e)
         return json_err(f"查询{pool}股池失败: {e}")
+
+
+def zt_industry_counts(date: str = "") -> dict | None:
+    """涨停池按所属行业分桶计数（行业名为东财 4 字截断原文）。
+
+    供板块行情计算 limit_up（板块内涨停家数）；失败/无数据返回 None，
+    调用方省略字段即可，不报错。缓存跟随三池当日 TTL。
+    """
+    day = parse_day(date) or datetime.now().date()
+    try:
+        df = _pool_cached("涨停", day)[0]
+        if df is None or df.empty or "所属行业" not in df.columns:
+            return None
+        return {str(k): int(v) for k, v in df["所属行业"].value_counts().items()}
+    except Exception:  # noqa: BLE001
+        return None

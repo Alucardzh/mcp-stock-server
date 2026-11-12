@@ -39,7 +39,11 @@ def test_indices_section_mixed(monkeypatch):
     """2 个指数有数据、3 个缺失：返回成功的+notes"""
 
     def fake(symbol, **kw):
-        return _hist_df("2026-09-02") if symbol in ("000001", "399001") else _hist_df("2026-09-01")
+        return (
+            _hist_df("2026-09-02")
+            if symbol in ("000001", "399001")
+            else _hist_df("2026-09-01")
+        )
 
     monkeypatch.setattr(rm, "index_zh_a_hist", fake)
     out = rm.indices_section(date(2026, 9, 2))
@@ -48,7 +52,9 @@ def test_indices_section_mixed(monkeypatch):
 
 
 def test_indices_section_all_missing(monkeypatch):
-    monkeypatch.setattr(rm, "index_zh_a_hist", lambda symbol, **kw: _hist_df("2026-09-01"))
+    monkeypatch.setattr(
+        rm, "index_zh_a_hist", lambda symbol, **kw: _hist_df("2026-09-01")
+    )
     with pytest.raises(ValueError):
         rm.indices_section(date(2026, 9, 2))
 
@@ -173,3 +179,77 @@ def test_get_zt_pool_zhaban_first_seal_time(monkeypatch):
     assert out["success"]
     assert out["data"]["items"][0]["首次封板时间"] == "101500"
     assert "最后封板时间" not in out["data"]["items"][0]
+
+
+# ---- 追加到 tests/test_review_market.py（pytest/json/pd/rm 顶部已 import）----
+
+
+@pytest.fixture(autouse=True)
+def _clear_push2_cache():
+    """三池/push2 缓存跨用例隔离（对既有用例无副作用）。"""
+    from utils.push2_client import CACHE
+
+    CACHE.clear()
+    yield
+    CACHE.clear()
+
+
+def _pool_df(n=70):
+    return pd.DataFrame(
+        {
+            "代码": [f"60000{i}" for i in range(n)],
+            "名称": [f"股{i}" for i in range(n)],
+            "涨跌幅": [10.0] * n,
+            "最新价": [10.0 + i for i in range(n)],
+            "成交额": [1e8] * n,
+            "换手率": [1.0] * n,
+            "封板资金": [6.5e8] * n,
+            "首次封板时间": ["092500"] * n,
+            "最后封板时间": ["093000"] * n,
+            "炸板次数": [0] * n,
+            "涨停统计": ["1/1"] * n,
+            "连板数": [1] * n,
+            "所属行业": ["元件" if i % 2 else "半导体" for i in range(n)],
+        }
+    )
+
+
+def test_zt_pool_truncated_by_default(monkeypatch):
+    monkeypatch.setitem(rm.POOL_FETCHERS, "涨停", lambda date: _pool_df(70))
+    out = json.loads(rm.get_zt_pool("涨停", "2026-11-12"))
+    assert out["success"] and out["data"]["count"] == 70
+    assert len(out["data"]["items"]) == rm.MAX_POOL_ROWS  # 默认截断 60
+    assert out["data"]["as_of"] and out["data"]["source"] == "eastmoney_push2ex"
+
+
+def test_zt_pool_full_returns_all(monkeypatch):
+    monkeypatch.setitem(rm.POOL_FETCHERS, "涨停", lambda date: _pool_df(85))
+    out = json.loads(rm.get_zt_pool("涨停", "2026-11-12", full=True))
+    assert out["data"]["count"] == 85 and len(out["data"]["items"]) == 85
+
+
+def test_zt_pool_cached_second_call(monkeypatch):
+    counter = {"n": 0}
+
+    def fetch(date):
+        counter["n"] += 1
+        return _pool_df(3)
+
+    monkeypatch.setitem(rm.POOL_FETCHERS, "涨停", fetch)
+    rm.get_zt_pool("涨停", "2026-11-12")
+    out = json.loads(rm.get_zt_pool("涨停", "2026-11-12"))
+    assert counter["n"] == 1 and out["data"]["cached"] is True
+
+
+def test_zt_industry_counts(monkeypatch):
+    monkeypatch.setitem(rm.POOL_FETCHERS, "涨停", lambda date: _pool_df(6))
+    counts = rm.zt_industry_counts("2026-11-12")
+    assert counts == {"元件": 3, "半导体": 3}
+
+
+def test_zt_industry_counts_failure_returns_none(monkeypatch):
+    def boom(date):
+        raise ValueError("upstream down")
+
+    monkeypatch.setitem(rm.POOL_FETCHERS, "涨停", boom)
+    assert rm.zt_industry_counts("2026-11-12") is None

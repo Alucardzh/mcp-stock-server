@@ -45,11 +45,12 @@ def get_market_breadth_tool(date: str = "") -> str:
 
 
 @mcp.tool()
-def get_zt_pool_tool(pool: str = "涨停", date: str = "") -> str:
+def get_zt_pool_tool(pool: str = "涨停", date: str = "", full: bool = False) -> str:
     """查询涨停生态股池明细（金额单位: 亿元）
 
     Args:
         pool: 涨停/炸板/跌停/强势/昨涨停，默认"涨停"
         date: 查询日期 YYYY-MM-DD，默认今天；无数据时自动回退最近交易日
+        full: 默认 false 截断前 60 条；true 返回全量（链强度/炸板率/晋级率必须全量）
     """
-    return get_zt_pool(pool, date)
+    return get_zt_pool(pool, date, full)
