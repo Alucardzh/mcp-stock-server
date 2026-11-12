@@ -386,6 +386,101 @@ def warmup_board_cache(board_codes: list[str] = []) -> str:
         return json_err(f"预热板块缓存失败: {e}")
 
 
+_MEMBERS_FIELDS = "f12,f14,f2,f3"
+_MEMBERS_PAGE = 100
+_MEMBERS_MAX_PAGES = 20  # 2000 只安全阀（最大板块~500 成分股）
+
+
+@RateLimiter(max_calls=10, time_window=60)
+def get_board_members(board_code: str, limit: int = 100, offset: int = 0) -> str:
+    """板块成分股清单（G6）：分页 + 当日缓存 + truncated 标记
+
+    Args:
+        board_code: 东财板块代码，如 BK0459
+        limit: 返回条数 ≤600，默认 100
+        offset: 跳过前 N 条（分页）
+    """
+    from datetime import datetime as _dt
+
+    code = (board_code or "").strip()
+    if not code:
+        return json_err_code("INVALID_ARG", "board_code 不能为空")
+    if not code.startswith("BK"):
+        code = f"BK{code}"
+    try:
+        limit = max(1, min(int(limit), 600))
+        offset = max(0, int(offset))
+        key = f"members:{code}:{_dt.now().date()}"
+
+        def _fetch() -> EmResult:
+            rows, as_of, total = [], "", 0
+            for pn in range(1, _MEMBERS_MAX_PAGES + 1):
+                res = em_push2_get(
+                    "/api/qt/clist/get",
+                    {
+                        "pn": pn,
+                        "pz": _MEMBERS_PAGE,
+                        "po": 1,
+                        "np": 1,
+                        "fltt": 2,
+                        "invt": 2,
+                        "fid": "f3",
+                        "fs": f"b:{code}",
+                        "fields": _MEMBERS_FIELDS,
+                    },
+                )
+                if not res.ok:
+                    return res
+                as_of = as_of or res.as_of
+                diff = (res.data or {}).get("diff") or []
+                if pn == 1:
+                    total = int((res.data or {}).get("total") or 0)
+                rows.extend(diff)
+                if len(diff) < _MEMBERS_PAGE:
+                    break
+            if total == 0:
+                # 空成分股 = 无效板块代码（不缓存，便于新板块代码日后生效）
+                return EmResult(ok=False, reason="not_found")
+            return EmResult(ok=True, data={"rows": rows, "total": total}, as_of=as_of)
+
+        res = CACHE.get(key, 86400, _fetch)
+        if not res.ok:
+            if res.reason == "not_found":
+                return json_err_code("BOARD_NOT_FOUND", f"板块不存在或无成分股: {code}")
+            return json_unavailable(res.reason)
+        rows = res.data["rows"]
+        total = res.data["total"]
+        items = [
+            {
+                "code": str(r.get("f12", "")),
+                "name": str(r.get("f14", "")),
+                "price": _f(r.get("f2")),
+                "chg_pct": _f(r.get("f3")),
+            }
+            for r in rows[offset : offset + limit]
+        ]
+        has_more = offset + limit < total
+        return json_ok(
+            {
+                "board_code": code,
+                "count": total,
+                "offset": offset,
+                "limit": limit,
+                "has_more": has_more,
+                "next_offset": offset + limit if has_more else None,
+                "truncated": False,
+                "items": items,
+                "as_of": res.as_of,
+                "cached": res.cached,
+                "stale": res.stale,
+                "source": _SOURCE,
+            }
+        )
+    except Exception as e:  # noqa: BLE001
+        logger.error("Error in get_board_members: %s", e)
+        return json_err(f"查询板块成分股失败: {e}")
+
+
 @RateLimiter(max_calls=20, time_window=60)
 def get_board_quote(
     board_code: str = "", board_name: str = "", fields: list[str] = []

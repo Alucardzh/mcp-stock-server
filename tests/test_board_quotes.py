@@ -690,3 +690,47 @@ def test_warmup_board_cache(monkeypatch):
     assert d["opens"] == {"requested": 1, "ok": 1}
     assert d["pool"] == "ok"
     assert "/api/qt/stock/get" in calls["paths"]
+
+
+# ---- Task3 G6: 板块成分股清单 ----
+
+
+def test_board_members_paginated(monkeypatch):
+    """G6：成分股分页缓存；单页 100 内一次请求。"""
+    members = [
+        {"f12": f"60000{i}", "f14": f"股{i}", "f2": 10.0 + i, "f3": 1.0}
+        for i in range(3)
+    ]
+    calls = {"paths": []}
+
+    # 直接按 path 精细 mock（fs=b: 形态）：
+    def fake(path, params):
+        calls["paths"].append((path, params.get("fs", "")))
+        if path == "/api/qt/clist/get" and params.get("fs") == "b:BK0459":
+            return EmResult(
+                ok=True,
+                data={"total": 3, "diff": members},
+                as_of="t",
+            )
+        raise AssertionError(f"unexpected {path} {params}")
+
+    monkeypatch.setattr(bq, "em_push2_get", fake)
+    out = json.loads(bq.get_board_members("BK0459", limit=2, offset=1))
+    d = out["data"]
+    assert d["count"] == 3 and d["truncated"] is False
+    assert [m["code"] for m in d["items"]] == ["600001", "600002"]
+    assert d["has_more"] is False and d["next_offset"] is None
+    # 缓存命中：再调一次上游只被请求过一次
+    bq.get_board_members("BK0459")
+    clist_calls = [c for c in calls["paths"] if c[0] == "/api/qt/clist/get"]
+    assert len(clist_calls) == 1
+
+
+def test_board_members_not_found(monkeypatch):
+    def fake(path, params):
+        assert params.get("fs") == "b:BK9999"
+        return EmResult(ok=True, data={"total": 0, "diff": []}, as_of="t")
+
+    monkeypatch.setattr(bq, "em_push2_get", fake)
+    out = json.loads(bq.get_board_members("BK9999"))
+    assert out["success"] is False and out["error_code"] == "BOARD_NOT_FOUND"

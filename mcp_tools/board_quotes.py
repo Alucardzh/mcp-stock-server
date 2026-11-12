@@ -51,3 +51,17 @@ def get_boards_tool(
         offset: 按 sort 排序后跳过前 N 条（分页取排行尾部；越界返回空列表）
     """
     return get_boards(scope, sort, limit, with_open, offset)
+
+
+@mcp.tool()
+def get_board_members_tool(board_code: str, limit: int = 100, offset: int = 0) -> str:
+    """板块成分股清单（分页+当日缓存；items=[{code,name,price,chg_pct}]）
+
+    Args:
+        board_code: 东财板块代码，如 BK0459
+        limit: 返回条数 ≤600，默认 100
+        offset: 跳过前 N 条（分页）
+    """
+    from utils.board_quotes import get_board_members
+
+    return get_board_members(board_code, limit, offset)
