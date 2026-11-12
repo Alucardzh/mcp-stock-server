@@ -2,9 +2,11 @@
 """板块行情：R1 单板块开盘涨跌幅 + R2 板块清单排行。
 
 上游 = 东财 push2（经 utils.push2_client → akproxy）：
-- clist/get m:90 板块列表（f17/f18 若板块支持则免额外开盘请求）；
-- ulist.np/get 批量开盘价 f46/f60，不支持板块 secid 时自动退化逐板块 stock/get
-  （stock/get 的 fields 必须全集，精简会"假失败"返回空 data——需求文档坑1）；
+- clist/get m:90 板块列表（单页上限 100 行，pz>100 也只回 100 → pn 翻页拉全量）；
+- 板块 clist f17/f18 为非标刻度（约 ×1000），仅用于 open_pct 比值（刻度不变）；
+  原始 open/prev_close 以 stock/get 为准；
+- ulist.np/get 对板块 secid 的 f46/f60 返回 "-" 占位（不可用），fetch_board_open
+  自动退化逐板块 stock/get（其 fields 必须全集，精简会"假失败"返回空 data——坑1）；
 - 开盘涨跌幅 = (f46-f60)/f60*100；f46 缺失（未开盘/停牌）→ open_pct=null + status=no_open。
 
 board_name 一律东财原文透传（含截断名/罗马数字），禁止规范化。
@@ -30,6 +32,8 @@ logger = logging.getLogger(__name__)
 BOARD_LIST_TTL = 60.0  # 板块清单缓存（秒）
 BOARD_OPEN_TTL = 60.0  # 开盘价缓存（秒）
 _ULIST_CHUNK = 100  # GET URL 长度安全分块
+_CLIST_PAGE_SIZE = 100  # clist 单页行数上限（实测 pz>100 也只回 100）
+_CLIST_MAX_PAGES = 8  # 翻页安全上限（概念 ~496 板块 → 5 页）
 
 ulist_ok: bool | None = (
     None  # None=未探测；False=ulist 不支持板块 secid，已退化 stock/get
@@ -80,11 +84,12 @@ def _normalize_board_row(scope: str, raw: dict) -> dict:
 def fetch_board_list(scope: str) -> EmResult:
     """板块清单快照（含主力资金/涨跌家数/领涨股；缓存 60s，stale 降级）。
 
-    data = {"scope", "boards": [规范化行], "by_code", "by_name", "total"}
+    clist 单页上限 100 行：pn=1..N 逐页拉取（短页即末页；安全上限 8 页），
+    合并全部 diff 行。data = {"scope", "boards", "by_code", "by_name",
+    "total"=合并行数, "upstream_total"=上游 total（触 8 页上限时应小于它）}。
     """
     params = {
-        "pn": 1,
-        "pz": 600,
+        "pz": _CLIST_PAGE_SIZE,
         "po": 1,
         "np": 1,
         "fltt": 2,
@@ -95,13 +100,22 @@ def fetch_board_list(scope: str) -> EmResult:
     }
 
     def _fetch() -> EmResult:
-        res = em_push2_get("/api/qt/clist/get", params)
-        if not res.ok:
-            return res
-        diff = (res.data or {}).get("diff") or []
+        rows, as_of, upstream_total = [], "", None
+        for pn in range(1, _CLIST_MAX_PAGES + 1):
+            res = em_push2_get("/api/qt/clist/get", {**params, "pn": pn})
+            if not res.ok:
+                return res
+            as_of = as_of or res.as_of
+            data = res.data or {}
+            if upstream_total is None:
+                upstream_total = data.get("total")
+            diff = data.get("diff") or []
+            rows.extend(diff)
+            if len(diff) < _CLIST_PAGE_SIZE:
+                break
         boards = [
             _normalize_board_row(scope, r)
-            for r in diff
+            for r in rows
             if str(r.get("f12", "")).startswith("BK")
         ]
         snapshot = {
@@ -110,8 +124,9 @@ def fetch_board_list(scope: str) -> EmResult:
             "by_code": {b["board_code"]: b for b in boards},
             "by_name": {b["board_name"]: b for b in boards},
             "total": len(boards),
+            "upstream_total": upstream_total,
         }
-        return EmResult(ok=True, data=snapshot, as_of=res.as_of)
+        return EmResult(ok=True, data=snapshot, as_of=as_of)
 
     return CACHE.get(f"board_list:{scope}", BOARD_LIST_TTL, _fetch)
 
@@ -248,17 +263,15 @@ def get_board_quote(board_code: str = "", board_name: str = "") -> str:
 
         counts = zt_industry_counts()
         notes = []
-        if row.get("_open") is not None and row.get("_prev_close") is not None:
-            # clist f17/f18 已齐，免额外开盘请求（与 R2 同口径）
-            openq, open_res = {}, EmResult(ok=True)
+        # 板块开盘价恒走 fetch_board_open（ulist 对板块无效 → 退化 stock/get）；
+        # clist f17/f18 为非标刻度，原始值不得回退混入。
+        open_res = fetch_board_open([row["board_code"]])
+        if open_res.ok:
+            openq = (open_res.data or {}).get(row["board_code"]) or {}
         else:
-            open_res = fetch_board_open([row["board_code"]])
-            if open_res.ok:
-                openq = (open_res.data or {}).get(row["board_code"]) or {}
-            else:
-                openq, notes = {}, [f"开盘数据不可用({open_res.reason})"]
-        open_ = openq.get("open", row.get("_open"))
-        prev = openq.get("prev_close", row.get("_prev_close"))
+            openq, notes = {}, [f"开盘数据不可用({open_res.reason})"]
+        open_ = openq.get("open")
+        prev = openq.get("prev_close")
 
         out = _emit_row(row, counts)
         out.update(
@@ -330,7 +343,9 @@ def get_boards(
         scope: 行业（默认）/ 概念
         sort: main_net（默认）/ chg / open_pct
         limit: 返回条数 ≤50，默认 20
-        with_open: 是否附带开盘涨跌幅（默认 true；false 省上游请求）
+        with_open: 是否附带开盘涨跌幅（默认 true；false 省上游请求）。
+            open_pct 用 clist f17/f18 比值（非标刻度，比值不受影响）；原始
+            open/prev_close 仅在真实渠道（stock/get）有值时输出，否则 null。
     """
     try:
         if scope not in _SCOPE_FS:
@@ -352,7 +367,7 @@ def get_boards(
             if all(
                 b["_open"] is not None and b["_prev_close"] is not None for b in boards
             ):
-                pass  # clist f17/f18 已齐，免 ulist
+                pass  # clist f17/f18 已齐：仅用其比值，免（对板块无效的）ulist 请求
             else:
                 open_res = fetch_board_open([b["board_code"] for b in boards])
                 if open_res.ok:
@@ -361,13 +376,17 @@ def get_boards(
                     notes.append(f"开盘涨跌幅不可用({open_res.reason})，open_pct 为空")
             for b in boards:
                 o = opens.get(b["board_code"]) or {}
-                b["open"] = o.get("open", b["_open"])
-                b["prev_close"] = o.get("prev_close", b["_prev_close"])
-                b["open_pct"] = _open_pct(b["open"], b["prev_close"])
+                # 原始 open/prev_close 仅来自真实渠道（stock/get/ulist）；
+                # clist f17/f18 非标刻度不外发，仅用于 open_pct 比值（刻度不变）。
+                b["open"] = o.get("open")
+                b["prev_close"] = o.get("prev_close")
+                b["open_pct"] = _open_pct(
+                    o.get("open", b["_open"]), o.get("prev_close", b["_prev_close"])
+                )
         else:
             for b in boards:
-                b["open"] = b["_open"]
-                b["prev_close"] = b["_prev_close"]
+                b["open"] = None  # clist 非标刻度不外发
+                b["prev_close"] = None
                 b["open_pct"] = _open_pct(b["_open"], b["_prev_close"])
 
         sort_key = {
