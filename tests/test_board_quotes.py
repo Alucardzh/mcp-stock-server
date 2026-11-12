@@ -1,6 +1,7 @@
 """板块行情单测：全部 mock 上游（em_push2_get / zt_industry_counts），无网络。"""
 
 import json
+from types import SimpleNamespace
 
 import pytest
 
@@ -634,6 +635,44 @@ def test_board_quote_light_fields_invalid(monkeypatch):
         bq.get_board_quote(board_name="元件", fields=["open"])  # 轻量仅支持 code
     )
     assert out2["error_code"] == "INVALID_ARG"
+    out3 = json.loads(
+        bq.get_board_quote(fields=["open"])  # fields 但无 code/name 也不轻量
+    )
+    assert out3["error_code"] == "INVALID_ARG"
+
+
+def test_open_ttl_time_aware(monkeypatch):
+    """开盘价缓存 TTL 时间感知：09:25 撮合定稿前 60s、之后放宽 3600s。"""
+
+    class FakeDT:
+        hm = (9, 24)
+
+        @classmethod
+        def now(cls):
+            return SimpleNamespace(hour=cls.hm[0], minute=cls.hm[1])
+
+    monkeypatch.setattr(bq, "datetime", FakeDT)
+    FakeDT.hm = (9, 24)
+    assert bq._open_ttl() == bq.BOARD_OPEN_TTL == 60.0
+    FakeDT.hm = (9, 25)
+    assert bq._open_ttl() == bq.BOARD_OPEN_TTL_POST == 3600.0
+
+
+def test_board_quote_concept_hit_when_industry_fails(monkeypatch):
+    """lazy 路径：行业快照限流失败 → 拉概念命中（游戏Ⅱ），不误报 unavailable。"""
+    _mock_upstream(
+        monkeypatch,
+        industry=EmResult(ok=False, reason="rate_limited"),
+        concept=EmResult(ok=True, data=_clist_payload([_ROW_YOUXI]), as_of="t"),
+        ulist=EmResult(ok=True, data={"diff": []}, as_of="t"),
+        stock_get=EmResult(ok=True, data={"f46": 20.0, "f60": 19.9}, as_of="t"),
+    )
+    monkeypatch.setattr(bq, "zt_industry_counts", lambda date="": None)
+    out = json.loads(bq.get_board_quote(board_name="游戏Ⅱ"))
+    assert out["success"], out
+    d = out["data"]
+    assert d["board_code"] == "BK1044" and d["board_name"] == "游戏Ⅱ"
+    assert d["scope"] == "概念" and d["open"] == 20.0
 
 
 def test_warmup_board_cache(monkeypatch):

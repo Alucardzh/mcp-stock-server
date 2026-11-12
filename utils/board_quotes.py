@@ -18,6 +18,7 @@ limit_up（板块内涨停家数）来自涨停池所属行业分桶（review_ma
 
 import json
 import logging
+from datetime import datetime
 
 from .push2_client import CACHE, EmResult, em_push2_get, now_iso
 from .review_common import (
@@ -32,7 +33,8 @@ from .tools import RateLimiter
 logger = logging.getLogger(__name__)
 
 BOARD_LIST_TTL = 60.0  # 板块清单缓存（秒）
-BOARD_OPEN_TTL = 60.0  # 开盘价缓存（秒）
+BOARD_OPEN_TTL = 60.0  # 09:25 前：竞价虚拟撮合价仍在变
+BOARD_OPEN_TTL_POST = 3600.0  # 09:25 后：开盘价当日定稿（prev_close 恒不变）
 _ULIST_CHUNK = 100  # GET URL 长度安全分块
 _CLIST_PAGE_SIZE = 100  # clist 单页行数上限（实测 pz>100 也只回 100）
 _CLIST_MAX_PAGES = 8  # 翻页安全上限（概念实测 531 板块 → 6 页（8 页上限容许到 800））
@@ -63,6 +65,14 @@ def _f(v) -> float | None:
 def _int_or_none(v) -> int | None:
     n = _f(v)
     return int(n) if n is not None else None
+
+
+def _open_ttl() -> float:
+    """开盘价缓存 TTL：开盘竞价定稿(09:25)前短、之后放宽——预热才能真正生效。"""
+    now = datetime.now()
+    if (now.hour, now.minute) >= (9, 25):
+        return BOARD_OPEN_TTL_POST
+    return BOARD_OPEN_TTL
 
 
 def _normalize_board_row(scope: str, raw: dict) -> dict:
@@ -193,7 +203,8 @@ def _fetch_open_stock_get(codes: list[str]) -> EmResult:
 
 
 def fetch_board_open(codes: list[str]) -> EmResult:
-    """板块开盘价/昨收（缓存 60s；data = {code: {open, prev_close, current, f59}}）。
+    """板块开盘价/昨收（TTL 时间感知：09:25 前 60s / 后 3600s；
+    data = {code: {open, prev_close, current, f59}}）。
     current/f59 仅 stock/get 退化通道有值，ulist 通道恒为 None。
 
     优先 ulist 批量；ulist ok 但一行都没有 → 判定不支持板块 secid，进程内退化
@@ -217,7 +228,7 @@ def fetch_board_open(codes: list[str]) -> EmResult:
                 return res
         return _fetch_open_stock_get(codes)
 
-    return CACHE.get("board_open:" + ",".join(codes), BOARD_OPEN_TTL, _fetch)
+    return CACHE.get("board_open:" + ",".join(codes), _open_ttl(), _fetch)
 
 
 def _limit_up_for(board_name: str, counts: dict | None) -> int | None:
@@ -355,12 +366,12 @@ def warmup_board_cache(board_codes: list[str] = []) -> str:
             lists[scope] = "ok" if s.ok else f"unavailable({s.reason})"
         codes = sorted({c.strip() for c in board_codes or [] if c and c.strip()})
         opens = {"requested": len(codes), "ok": 0}
-        if codes:
-            res = fetch_board_open(
-                [c if c.startswith("BK") else f"BK{c}" for c in codes]
-            )
-            opens["ok"] = len(res.data or {}) if res.ok else 0
-            if not res.ok:
+        for c in codes:
+            cc = c if c.startswith("BK") else f"BK{c}"
+            res = fetch_board_open([cc])  # 逐码预热：键与后续单码查询一致
+            if res.ok:
+                opens["ok"] += 1
+            elif "reason" not in opens:
                 opens["reason"] = res.reason
         counts = zt_industry_counts()
         return json_ok(
@@ -399,7 +410,9 @@ def get_board_quote(
             )
         if fs and name:
             return json_err_code("INVALID_ARG", "轻量模式仅支持 board_code 查询")
-        if fs and code:
+        if fs and not code:
+            return json_err_code("INVALID_ARG", "轻量模式需要 board_code")
+        if fs:
             return _board_quote_light(code, fs)
 
         if not code and not name:
