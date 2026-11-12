@@ -13,7 +13,7 @@
 """
 
 from concurrent.futures import ThreadPoolExecutor
-from datetime import date as date_type, datetime
+from datetime import date as date_type, datetime, timedelta
 import json
 import logging
 
@@ -205,11 +205,12 @@ def _fupan_v1_fetch(day: date_type, symbols: list[str], opts: dict) -> str:
         if isinstance(val, dict):
             any_stale = any_stale or bool(val.get("stale"))
             any_cached = any_cached and bool(val.get("cached", True))
-    # 跌停池 >30 天上游限制 → 历史日期补降级标记（探测确认后保留）
+    # 跌停池上游仅保留近 30 天：仅超出窗口的日期补降级标记；
+    # 窗口内 None 保持 null（无数据/空池，缺数据≠零值，不误标为上游限制）
     if (
         opts["with_pools"]
         and sections["pools"].get("dt") is None
-        and day < datetime.now().date()
+        and day < datetime.now().date() - timedelta(days=30)
     ):
         sections["pools"]["dt"] = {
             "status": "unavailable",
@@ -247,6 +248,11 @@ def fupan_v1(date: str = "", symbols: list[str] = [], options: dict = {}) -> str
             )
         if day > datetime.now().date():
             return json_err_code("INVALID_ARG", f"查询日期 {day} 晚于今天")
+        bars_opt = (options or {}).get("kline_bars", 130)
+        if not isinstance(bars_opt, int) or bars_opt < 20 or bars_opt > 1000:
+            return json_err_code(
+                "INVALID_ARG", f"kline_bars 非法: {bars_opt!r}（20~1000 整数）"
+            )
         if _is_not_ready(day):
             return json_not_ready("15:05")
 

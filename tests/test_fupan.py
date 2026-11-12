@@ -153,3 +153,55 @@ def test_fupan_v1_cached(monkeypatch):
     fp.fupan_v1("2026-11-11")
     out = json.loads(fp.fupan_v1("2026-11-11"))
     assert out["data"]["cached"] is True
+
+
+def _dt_none_flow(monkeypatch, date):
+    class FakeNow(datetime):
+        @classmethod
+        def now(cls):
+            return cls(2026, 11, 17, 16, 0)
+
+    _mock_sections(monkeypatch)
+    monkeypatch.setattr(
+        fp,
+        "pool_full_snapshot",
+        lambda pool, day: (
+            None
+            if pool == "跌停"
+            else {
+                "pool": pool,
+                "count": 1,
+                "items": [{"code": "002384", "hybk": "元件", "lianban": 1}],
+                "truncated": False,
+                "as_of": "t",
+                "notes": [],
+            }
+        ),
+    )
+    monkeypatch.setattr(fp, "datetime", FakeNow)
+    # 绕过限流装饰器：本文件取数用例已达 6 次/60s 额度，避免顺序相关的误失败
+    monkeypatch.setattr(fp, "_fupan_v1_fetch", fp._fupan_v1_fetch.__wrapped__)
+    out = json.loads(fp.fupan_v1(date))
+    assert out["success"]
+    return out["data"]["sections"]
+
+
+def test_fupan_v1_dt_marker_beyond_30d(monkeypatch):
+    s = _dt_none_flow(monkeypatch, "2026-10-01")
+    assert s["pools"]["dt"]["reason"] == "dt_pool_30d_limit"
+
+
+def test_fupan_v1_dt_none_within_30d_stays_null(monkeypatch):
+    """窗口内跌停池 None → null（空池/无数据），不误标 30 天限制。"""
+    s = _dt_none_flow(monkeypatch, "2026-11-16")
+    assert s["pools"]["dt"] is None
+
+
+@pytest.mark.parametrize("bars", ["abc", 10])
+def test_fupan_v1_invalid_kline_bars(monkeypatch, bars):
+    def boom(*a, **k):
+        raise AssertionError("不应进入取数路径")
+
+    monkeypatch.setattr(fp, "_fupan_v1_fetch", boom)
+    out = json.loads(fp.fupan_v1("2026-11-11", options={"kline_bars": bars}))
+    assert out["success"] is False and out["error_code"] == "INVALID_ARG"
