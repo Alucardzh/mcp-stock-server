@@ -56,3 +56,18 @@
 2. G5（lazy scope + fields 轻量 + warmup 工具）
 3. G6（get_board_members_tool）
 4. live 验证 + SERVER_INSTRUCTIONS + build/push + 部署确认（一次重启覆盖 offset+全部新改动）
+
+## 4. 验收实测
+
+**实测时间**：2026-11-12 晚（~20:00，交易日收盘后；上游命中盘后缓存，预热后耗时因此为缓存命中值）。
+**方式**：`uv run pytest tests/test_live_board_smoke.py -m live -v`（新增 `test_v3_gaps_live`）+ 逐项数值探针。
+
+| 项 | 结果 | 实测数据 |
+|---|---|---|
+| G1 一枪全量 | ✓ | `get_boards(概念, sort=code, limit=600)` → total=**554**，单次返回 **554** 条（has_more=false, next_offset=null）；设计估算 531，实测 554 |
+| G2 前缀匹配 | ✓ | `get_board_quote(board_name="汽车零部")` → matched_by=**prefix**，命中 汽车零部件/BK0481（无歧义） |
+| G5 预热+提速 | ✓ | `warmup_board_cache(["BK0459","BK0481"])` → lists 行业=ok/概念=ok，opens 2/2 ok，pool=ok；预热后 BK0481 行情 **0.00s**（cached=true，≤3.5s 门槛大幅达标） |
+| G6 成分股 | ✓ | `get_board_members("BK0459", limit=50)` → count=**67**（>20），items=50，truncated=**false**，has_more=true/next_offset=50（分页元数据正确） |
+
+- 附加确认：BK0481 行业名即"汽车零部件"（前缀/精确一致）；live 套件 5/5 passed（29.68s）；离线套件 199 passed / 17 deselected。
+- G3/G4 无需改动（§1 裁定），未纳入实测。

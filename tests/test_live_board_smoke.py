@@ -1,10 +1,17 @@
 """板块工具真实接口冒烟（-m live 显式运行，需 AKPROXY_TOKEN；交易日盘中跑最有意义）。"""
 
 import json
+import time
 
 import pytest
 
-from utils import get_board_quote, get_boards, get_zt_pool
+from utils import (
+    get_board_members,
+    get_board_quote,
+    get_boards,
+    get_zt_pool,
+    warmup_board_cache,
+)
 
 
 @pytest.mark.live
@@ -46,3 +53,26 @@ def test_rapid_calls_never_throw():
     for _ in range(20):
         payload = json.loads(get_board_quote(board_code="BK0459"))
         assert "success" in payload
+
+
+@pytest.mark.live
+def test_v3_gaps_live():
+    from utils import get_board_members, get_board_quote, get_boards, warmup_board_cache
+
+    w = json.loads(warmup_board_cache(["BK0459", "BK0481"]))
+    assert w["success"] and w["data"]["lists"]["行业"] == "ok"
+    t0 = time.time()
+    q = json.loads(get_board_quote(board_code="BK0481"))
+    dt = time.time() - t0
+    if q.get("data"):
+        assert q["data"]["board_name"] == "汽车零部件"
+        assert dt <= 3.5, f"预热后 {dt:.1f}s"
+    p = json.loads(get_board_quote(board_name="汽车零部"))
+    if p.get("data"):
+        assert p["data"].get("matched_by") == "prefix"
+    b = json.loads(get_boards(scope="概念", sort="code", limit=600))
+    if b.get("data"):
+        assert b["data"]["total"] > 500 and len(b["data"]["boards"]) > 500
+    m = json.loads(get_board_members("BK0459", limit=50))
+    if m.get("data"):
+        assert m["data"]["count"] > 20 and m["data"]["truncated"] is False

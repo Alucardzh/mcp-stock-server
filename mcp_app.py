@@ -21,8 +21,10 @@ SERVER_INSTRUCTIONS = """A股行情与复盘数据服务器（东财数据源，
 - get_market_breadth_tool(date)：涨跌家数（仅当日）+ 涨跌停/炸板家数 + 连板梯队
 
 【板块】
-- get_board_quote_tool(board_code|board_name)：单板块开盘涨跌幅/主力净流入/涨跌家数/领涨股/涨停家数；board_name 必须东财原文（如 游戏Ⅱ）；查不到=BOARD_NOT_FOUND（配置错），限流=status:unavailable（缺数据≠条件不达标，标待人工判），未开盘=no_open
-- get_boards_tool(scope, sort, limit≤200, offset, with_open)：行业/概念板块排行（main_net/chg/open_pct 排序；offset 按排序跳过前 N 条分页）
+- get_board_quote_tool(board_code|board_name, fields?)：单板块行情；board_name 支持原文精确与 4 字截断前缀匹配（唯一命中标 matched_by，多命中 status:"ambiguous"+candidates）；fields 轻量模式（{open,prev_close,open_pct,current} 子集+board_code，秒级）；查不到=BOARD_NOT_FOUND，限流=unavailable，未开盘=no_open
+- get_boards_tool(scope, sort, limit≤600, offset, with_open)：行业/概念排行；sort=main_net/chg/open_pct（降序）或 code/name（字典序升序，翻页全量拉取）；响应带 has_more/next_offset
+- get_board_members_tool(board_code, limit, offset)：板块成分股（当日缓存，items=[code,name,price,chg_pct]）
+- warmup_board_cache_tool(board_codes?)：竞价前预热清单/开盘价/涨停池分桶
 
 【个股】
 - get_stock_realtime_tool / get_stock_history_tool / get_stock_basic_tool：实时快照 / 历史K线 / 基础信息

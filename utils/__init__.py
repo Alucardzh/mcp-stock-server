@@ -28,7 +28,7 @@ from .global_stocks import get_stock_global_snapshot
 from .global_linkage import get_global_linkage_review
 from .intraday import get_stock_auction, get_stock_intraday
 from .boards import get_stock_boards
-from .board_quotes import get_board_quote, get_boards
+from .board_quotes import get_board_members, get_board_quote, get_boards, warmup_board_cache
 from .fupan import fupan_v1
 from .lhb import get_lhb, get_lhb_seats
 
@@ -60,6 +60,8 @@ __all__ = [
     "get_stock_boards",
     "get_board_quote",
     "get_boards",
+    "get_board_members",
+    "warmup_board_cache",
     "get_lhb",
     "get_lhb_seats",
     "fupan_v1",
