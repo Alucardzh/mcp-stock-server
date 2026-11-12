@@ -311,35 +311,121 @@ def _json_ambiguous(name: str, candidates: list) -> str:
     )
 
 
+_LIGHT_FIELDS = {"open", "prev_close", "open_pct", "current"}
+
+
+def _board_quote_light(code: str, fields: set) -> str:
+    """fields 轻量路径：仅 board_code，跳过清单/涨停池，直连开盘价通道。
+
+    无清单无法校验板块存在性：无效代码会得到 open=None（no_open 语义），
+    轻量模式约定调用方使用清单/warmup 获得的有效 board_code。
+    """
+    if not code.startswith("BK"):
+        code = f"BK{code}"
+    open_res = fetch_board_open([code])
+    if not open_res.ok:
+        return json_unavailable(open_res.reason)
+    openq = (open_res.data or {}).get(code) or {}
+    out = {
+        "board_code": code,
+        "as_of": open_res.as_of,
+        "cached": open_res.cached,
+        "stale": open_res.stale,
+        "source": _SOURCE,
+    }
+    vals = {
+        "open": openq.get("open"),
+        "prev_close": openq.get("prev_close"),
+        "current": openq.get("current"),
+    }
+    vals["open_pct"] = _open_pct(vals["open"], vals["prev_close"])
+    for f in sorted(fields):
+        out[f] = vals[f]
+    if vals["open"] is None:
+        out["status"] = "no_open"
+    return json_ok(out)
+
+
+def warmup_board_cache(board_codes: list[str] = []) -> str:
+    """竞价前预热：双 scope 清单 + 指定板块开盘价 + 涨停池分桶（limit_up 依赖）。"""
+    try:
+        lists = {}
+        for scope in ("行业", "概念"):
+            s = fetch_board_list(scope)
+            lists[scope] = "ok" if s.ok else f"unavailable({s.reason})"
+        codes = sorted({c.strip() for c in board_codes or [] if c and c.strip()})
+        opens = {"requested": len(codes), "ok": 0}
+        if codes:
+            res = fetch_board_open(
+                [c if c.startswith("BK") else f"BK{c}" for c in codes]
+            )
+            opens["ok"] = len(res.data or {}) if res.ok else 0
+            if not res.ok:
+                opens["reason"] = res.reason
+        counts = zt_industry_counts()
+        return json_ok(
+            {
+                "lists": lists,
+                "opens": opens,
+                "pool": "ok" if counts else "unavailable",
+            }
+        )
+    except Exception as e:  # noqa: BLE001
+        logger.error("Error in warmup_board_cache: %s", e)
+        return json_err(f"预热板块缓存失败: {e}")
+
+
 @RateLimiter(max_calls=20, time_window=60)
-def get_board_quote(board_code: str = "", board_name: str = "") -> str:
+def get_board_quote(
+    board_code: str = "", board_name: str = "", fields: list[str] = []
+) -> str:
     """查询单个板块行情：开盘涨跌幅/主力净流入/涨跌家数/领涨股（R1）
 
     Args:
         board_code: 东财板块代码，如 BK0459（与 board_name 二选一）
-        board_name: 东财板块名原文，如 元件 / 游戏Ⅱ；都不给则返回全部板块精简表
+        board_name: 东财板块名原文或 4 字截断名（前缀匹配：唯一命中标 matched_by，
+            多命中返回 status:"ambiguous"+candidates）
+        fields: 轻量模式字段列表，仅 {open, prev_close, open_pct, current} 子集
+            且须用 board_code 查询（跳过清单/涨停池，秒级返回）
     """
     code, name = (board_code or "").strip(), (board_name or "").strip()
     try:
-        snaps = [fetch_board_list(s) for s in ("行业", "概念")]
-        if not any(s.ok for s in snaps):
-            reason = next((s.reason for s in snaps if s.reason), "upstream_error")
-            return json_unavailable(reason)
+        fs = {f.strip() for f in fields or [] if f and f.strip()}
+        if fs and not fs <= _LIGHT_FIELDS:
+            bad = sorted(fs - _LIGHT_FIELDS)
+            return json_err_code(
+                "INVALID_ARG",
+                f"轻量 fields 仅支持 {sorted(_LIGHT_FIELDS)}，非法: {bad}",
+            )
+        if fs and name:
+            return json_err_code("INVALID_ARG", "轻量模式仅支持 board_code 查询")
+        if fs and code:
+            return _board_quote_light(code, fs)
 
         if not code and not name:
+            snaps = [fetch_board_list(s) for s in ("行业", "概念")]
+            if not any(s.ok for s in snaps):
+                return json_unavailable(
+                    next((s.reason for s in snaps if s.reason), "upstream_error")
+                )
             return _boards_digest(snaps)
 
-        row, scope, matched_by, candidates = _lookup2(snaps, code, name)
+        # lazy scope：先行业（行业票省 6 页概念分页），未命中/多命中再拉概念
+        loaded = [fetch_board_list("行业")]
+        row, scope, matched_by, candidates = _lookup2(loaded, code, name)
+        if row is None:  # 未命中或多命中：拉概念后跨双 scope 重扫（候选更全）
+            loaded.append(fetch_board_list("概念"))
+            row, scope, matched_by, candidates = _lookup2(loaded, code, name)
         if candidates:
             return _json_ambiguous(name, candidates)
         if row is None:
-            if any(not s.ok for s in snaps):
+            if any(not s.ok for s in loaded):
                 # 单 scope 快照失败：板块可能在缺失的那组里，缺数据≠不存在
                 return json_unavailable(
-                    next((s.reason for s in snaps if not s.ok), "upstream_error")
+                    next((s.reason for s in loaded if not s.ok), "upstream_error")
                 )
             return json_err_code("BOARD_NOT_FOUND", f"板块不存在: {code or name}")
-        primary = next(s for s in snaps if s.ok and s.data["scope"] == scope)
+        primary = next(s for s in loaded if s.ok and s.data["scope"] == scope)
 
         counts = zt_industry_counts()
         notes = []

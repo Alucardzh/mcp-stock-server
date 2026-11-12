@@ -587,3 +587,67 @@ def test_board_quote_prefix_ambiguous(monkeypatch):
     assert out["status"] == "ambiguous"
     assert {c["board_name"] for c in out["candidates"]} == {"汽车零部件", "汽车整车"}
     assert all(c["scope"] == "行业" for c in out["candidates"])
+
+
+# ---- Task2 G5: lazy scope / fields 轻量 / warmup ----
+
+
+def test_board_quote_lazy_scope_skips_concept(monkeypatch):
+    """G5：行业命中不拉概念清单（省 6 页 × pacing）。"""
+    calls = _mock_upstream(
+        monkeypatch,
+        industry=EmResult(ok=True, data=_clist_payload([_ROW_YUANJIAN]), as_of="t"),
+        ulist=EmResult(ok=True, data={"diff": []}, as_of="t"),
+        stock_get=EmResult(ok=True, data={"f46": 49.4, "f60": 49.4}, as_of="t"),
+    )
+    monkeypatch.setattr(bq, "zt_industry_counts", lambda date="": None)
+    out = json.loads(bq.get_board_quote(board_name="元件"))
+    assert out["success"]
+    fs_params = [p for p in calls["paths"] if p == "/api/qt/clist/get"]
+    assert len(fs_params) == 1  # 只有行业一页，未拉概念
+
+
+def test_board_quote_light_fields(monkeypatch):
+    """G5：fields 轻量路径——仅 board_code，直连开盘价通道，不打清单。"""
+    calls = _mock_upstream(
+        monkeypatch,
+        stock_get=EmResult(
+            ok=True,
+            data={"f46": 42192.07, "f60": 42144.03, "f43": 43000.0, "f59": 2},
+            as_of="t",
+        ),
+        ulist=EmResult(ok=True, data={"diff": []}, as_of="t"),
+    )
+    out = json.loads(
+        bq.get_board_quote(board_code="BK0481", fields=["open", "open_pct"])
+    )
+    d = out["data"]
+    assert d["open"] == 42192.07 and abs(d["open_pct"] - 0.114) < 0.01
+    assert "main_net_yi" not in d and "limit_up" not in d
+    assert calls["paths"] == ["/api/qt/ulist.np/get", "/api/qt/stock/get"]
+
+
+def test_board_quote_light_fields_invalid(monkeypatch):
+    out = json.loads(bq.get_board_quote(board_code="BK0481", fields=["main_net_yi"]))
+    assert out["success"] is False and out["error_code"] == "INVALID_ARG"
+    out2 = json.loads(
+        bq.get_board_quote(board_name="元件", fields=["open"])  # 轻量仅支持 code
+    )
+    assert out2["error_code"] == "INVALID_ARG"
+
+
+def test_warmup_board_cache(monkeypatch):
+    calls = _mock_upstream(
+        monkeypatch,
+        industry=EmResult(ok=True, data=_clist_payload([_ROW_YUANJIAN]), as_of="t"),
+        concept=EmResult(ok=True, data=_clist_payload([]), as_of="t"),
+        ulist=EmResult(ok=True, data={"diff": []}, as_of="t"),
+        stock_get=EmResult(ok=True, data={"f46": 1.0, "f60": 1.0}, as_of="t"),
+    )
+    monkeypatch.setattr(bq, "zt_industry_counts", lambda date="": {"元件": 5})
+    out = json.loads(bq.warmup_board_cache(["BK0459"]))
+    d = out["data"]
+    assert d["lists"] == {"行业": "ok", "概念": "ok"}
+    assert d["opens"] == {"requested": 1, "ok": 1}
+    assert d["pool"] == "ok"
+    assert "/api/qt/stock/get" in calls["paths"]
