@@ -1,12 +1,13 @@
 """板块行情单测：全部 mock 上游（em_push2_get / zt_industry_counts），无网络。"""
 
 import json
-from types import SimpleNamespace
+import time
+from datetime import datetime
 
 import pytest
 
 from utils import board_quotes as bq
-from utils.push2_client import EmResult
+from utils.push2_client import EmResult, _CacheEntry
 
 
 @pytest.fixture(autouse=True)
@@ -509,7 +510,7 @@ def _row(code, name, main_e8):
 
 
 def test_boards_offset_pagination(monkeypatch):
-    """limit 上限 200；offset 按 sort 排序后跳过前 N 条（分页取尾部数据）。"""
+    """limit 上限 600；offset 按 sort 排序后跳过前 N 条（分页取尾部数据）。"""
     rows = [
         _row("BK0459", "元件", 81.79e8),  # main_net 降序第 1
         _row("BK1036", "半导体", 50.0e8),  # 第 2
@@ -529,7 +530,7 @@ def test_boards_offset_pagination(monkeypatch):
     out2 = json.loads(bq.get_boards(scope="行业", offset=10))
     assert out2["data"]["boards"] == [] and out2["data"]["total"] == 3
 
-    # limit>200 被钳制为 200（返回全部 3 条），offset<0 钳制为 0
+    # limit=300 在上限 600 内直用（返回全部 3 条），offset<0 钳制为 0
     out3 = json.loads(bq.get_boards(scope="行业", limit=300, offset=-5))
     assert len(out3["data"]["boards"]) == 3 and out3["data"]["offset"] == 0
 
@@ -642,20 +643,74 @@ def test_board_quote_light_fields_invalid(monkeypatch):
 
 
 def test_open_ttl_time_aware(monkeypatch):
-    """开盘价缓存 TTL 时间感知：09:25 撮合定稿前 60s、之后放宽 3600s。"""
+    """开盘价缓存 TTL 时间感知：09:25 撮合定稿前 60s；之后 = min(3600, 距定稿点
+    秒数)——定稿瞬间 0（边界必过期），随时间放宽，10:25 起封顶 3600。"""
 
     class FakeDT:
         hm = (9, 24)
 
         @classmethod
         def now(cls):
-            return SimpleNamespace(hour=cls.hm[0], minute=cls.hm[1])
+            return datetime(2026, 11, 12, cls.hm[0], cls.hm[1], 0)
 
     monkeypatch.setattr(bq, "datetime", FakeDT)
     FakeDT.hm = (9, 24)
     assert bq._open_ttl() == bq.BOARD_OPEN_TTL == 60.0
     FakeDT.hm = (9, 25)
-    assert bq._open_ttl() == bq.BOARD_OPEN_TTL_POST == 3600.0
+    assert bq._open_ttl() == 0.0  # 定稿瞬间：距定稿点 0s，一切旧条目过期
+    FakeDT.hm = (9, 26)
+    assert bq._open_ttl() == 60.0  # 距定稿点 60s
+    FakeDT.hm = (10, 25)
+    assert bq._open_ttl() == bq.BOARD_OPEN_TTL_POST == 3600.0  # 距定稿点 3600s 封顶
+
+
+def test_open_cache_boundary_expiry(monkeypatch):
+    """C1 回归：09:25 前写入的开盘价缓存条目不得活过开盘边界。
+
+    now 钉在 09:26 → 读时 TTL=min(3600, 距定稿点 60s)=60；缓存新鲜度走真实
+    time.time()（fetched_at 用真实 now-1560s 构造，等效 09:00 写入）：
+    竞价期条目 age=1560 > 60 → 必过期重拉；09:25:30 条目 age=30 ≤ 60 → 命中。
+    """
+
+    class FakeDT:
+        @staticmethod
+        def now():
+            return datetime.now().replace(hour=9, minute=26, second=0, microsecond=0)
+
+    monkeypatch.setattr(bq, "datetime", FakeDT)
+    calls = {"fetch": 0}
+
+    def fake_fetch(codes):
+        calls["fetch"] += 1
+        return EmResult(
+            ok=True,
+            data={
+                c: {"open": 49.4, "prev_close": 49.4, "current": None, "f59": None}
+                for c in codes
+            },
+            as_of="t",
+        )
+
+    monkeypatch.setattr(bq, "_fetch_open_stock_get", fake_fetch)
+    bq.ulist_ok = False  # 跳过 ulist 探测，直达 stock/get 通道
+
+    key = "board_open:BK0459"
+    # 09:00 竞价期写入的条目（f46='-' → open=None）：now=09:26 判定已过期
+    bq.CACHE._entries[key] = _CacheEntry(
+        {"BK0459": {"open": None, "prev_close": 49.4}}, "t-old", time.time() - 1560
+    )
+    res = bq.fetch_board_open(["BK0459"])
+    assert calls["fetch"] == 1  # 过期 → 上游被重新命中
+    assert res.cached is False and res.data["BK0459"]["open"] == 49.4
+
+    # 互补面：09:25:30 写入（age=30s ≤ TTL=60）→ 缓存命中，零上游请求
+    calls["fetch"] = 0
+    bq.CACHE._entries[key] = _CacheEntry(
+        {"BK0459": {"open": 50.0, "prev_close": 49.4}}, "t-new", time.time() - 30
+    )
+    res2 = bq.fetch_board_open(["BK0459"])
+    assert calls["fetch"] == 0
+    assert res2.cached is True and res2.data["BK0459"]["open"] == 50.0
 
 
 def test_board_quote_concept_hit_when_industry_fails(monkeypatch):

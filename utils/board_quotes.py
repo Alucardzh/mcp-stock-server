@@ -68,10 +68,16 @@ def _int_or_none(v) -> int | None:
 
 
 def _open_ttl() -> float:
-    """开盘价缓存 TTL：开盘竞价定稿(09:25)前短、之后放宽——预热才能真正生效。"""
+    """开盘价缓存 TTL（读时判定；条目不存 TTL）。
+
+    09:25 前 60s（虚拟撮合价仍在变）；09:25 后 = min(3600, 距定稿点秒数)——
+    竞价期写入的条目 age 恒大于"距定稿点时长"，必然在 09:25 边界过期，
+    不会把盘前 no_open/虚拟价带入开盘后。
+    """
     now = datetime.now()
-    if (now.hour, now.minute) >= (9, 25):
-        return BOARD_OPEN_TTL_POST
+    boundary = now.replace(hour=9, minute=25, second=0, microsecond=0)
+    if now >= boundary:
+        return min(BOARD_OPEN_TTL_POST, (now - boundary).total_seconds())
     return BOARD_OPEN_TTL
 
 
@@ -493,6 +499,8 @@ def get_board_quote(
         board_code: 东财板块代码，如 BK0459（与 board_name 二选一）
         board_name: 东财板块名原文或 4 字截断名（前缀匹配：唯一命中标 matched_by，
             多命中返回 status:"ambiguous"+candidates）
+            查找顺序：行业快照优先（命中即不拉概念，省 6 页分页）；
+            行业前缀唯一命中会短路概念侧的精确命中。
         fields: 轻量模式字段列表，仅 {open, prev_close, open_pct, current} 子集
             且须用 board_code 查询（跳过清单/涨停池，秒级返回）
     """
