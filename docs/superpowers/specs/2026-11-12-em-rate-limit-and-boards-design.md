@@ -95,7 +95,8 @@ def em_push2_get(path: str, params: dict, *, cache_ttl: float | None = None) -> 
 3. **板块开盘价刻度**：clist f17/f18 与 stock/get f46/f60 实测返回**同一非标刻度**
    （如元件 f46=49405.61，无 49.x 通道；需求文档示例的 49.4056 是文档作者
    对原始值 ÷100000 的假设）。`open_pct` 为比值，刻度无关，两通道实测精确一致。
-   R1 的 `open/prev_close` 以 stock/get 原值透传；R2 行内 `open_pct` 用 clist 比值，
+   R1 的 `open/prev_close` 以 stock/get 原值透传（**用户已确认 2026-11-12：保持上游原值，
+   不做 ÷1000 归一**——引擎消费 open_pct，刻度无关）；R2 行内 `open_pct` 用 clist 比值，
    无真实单板块值时 `open/prev_close` 置 null。
 4. **盘前防护**：当缺开盘价的板块过多（>20，如开盘前 f17 全为 `-`），
    R2 跳过批量开盘价请求，`open_pct` 用 clist 比值口径并附 note，
