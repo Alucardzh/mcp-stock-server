@@ -768,8 +768,8 @@ def _clean():
 
 
 def _clist_payload(rows):
-    """clist 响应体：rows = [{f12,f14,f2,f3,f17,f18,f62,f104,f105,f128,f140,f141}]"""
-    return {"data": {"total": len(rows), "diff": rows}}
+    """clist 上游 data（已解包）：rows = [{f12,f14,f2,f3,f17,f18,f62,f104,f105,f128,f140,f141}]"""
+    return {"total": len(rows), "diff": rows}
 
 
 _ROW_YUANJIAN = {
@@ -1201,6 +1201,7 @@ def get_board_quote(board_code: str = "", board_name: str = "") -> str:
         out = _emit_row(row, counts)
         out.update(
             {
+                "scope": scope,
                 "open": open_,
                 "prev_close": prev,
                 "open_pct": _open_pct(open_, prev),
