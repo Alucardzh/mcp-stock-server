@@ -248,11 +248,15 @@ def get_board_quote(board_code: str = "", board_name: str = "") -> str:
 
         counts = zt_industry_counts()
         notes = []
-        open_res = fetch_board_open([row["board_code"]])
-        if open_res.ok:
-            openq = (open_res.data or {}).get(row["board_code"]) or {}
+        if row.get("_open") is not None and row.get("_prev_close") is not None:
+            # clist f17/f18 已齐，免额外开盘请求（与 R2 同口径）
+            openq, open_res = {}, EmResult(ok=True)
         else:
-            openq, notes = {}, [f"开盘数据不可用({open_res.reason})"]
+            open_res = fetch_board_open([row["board_code"]])
+            if open_res.ok:
+                openq = (open_res.data or {}).get(row["board_code"]) or {}
+            else:
+                openq, notes = {}, [f"开盘数据不可用({open_res.reason})"]
         open_ = openq.get("open", row.get("_open"))
         prev = openq.get("prev_close", row.get("_prev_close"))
 
@@ -338,12 +342,16 @@ def get_boards(
         snap = fetch_board_list(scope)
         if not snap.ok:
             return json_unavailable(snap.reason or "upstream_error")
-        boards = list(snap.data["boards"])
+        boards = [
+            dict(b) for b in snap.data["boards"]
+        ]  # 缓存行按引用共享，先浅拷贝再改
         notes = []
 
         if with_open:
             opens = {}
-            if all(b["_open"] is not None for b in boards):
+            if all(
+                b["_open"] is not None and b["_prev_close"] is not None for b in boards
+            ):
                 pass  # clist f17/f18 已齐，免 ulist
             else:
                 open_res = fetch_board_open([b["board_code"] for b in boards])

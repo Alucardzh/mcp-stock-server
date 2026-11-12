@@ -185,6 +185,22 @@ def test_boards_open_from_clist_f17(monkeypatch):
     )
 
 
+def test_board_quote_open_from_clist_f17(monkeypatch):
+    """R1：clist 行自带 f17/f18 全齐 → 免 ulist/stock/get 请求，开盘价零成本路径。"""
+    row = dict(_ROW_YUANJIAN, f17=50.0)
+    calls = _mock_upstream(
+        monkeypatch,
+        industry=EmResult(ok=True, data=_clist_payload([row]), as_of="t"),
+        concept=EmResult(ok=True, data=_clist_payload([]), as_of="t"),
+    )
+    monkeypatch.setattr(bq, "zt_industry_counts", lambda date="": None)
+    out = json.loads(bq.get_board_quote(board_name="元件"))
+    assert all(p == "/api/qt/clist/get" for p in calls["paths"])
+    d = out["data"]
+    assert d["open"] == 50.0 and d["prev_close"] == 49.4854
+    assert abs(d["open_pct"] - (50.0 - 49.4854) / 49.4854 * 100) < 0.01
+
+
 def test_boards_open_fallback_stock_get(monkeypatch):
     """ulist 返回 ok 但 0 行 → 判定不支持板块 secid，退化逐板块 stock/get。"""
     calls = _mock_upstream(
