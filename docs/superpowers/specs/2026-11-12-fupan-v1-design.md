@@ -147,6 +147,21 @@ boards 冷 10.5s（akproxy pacing，6+1 页）‖ klines ~4s（8 并发）‖ po
 - A1 增量：scale 块返回且 divisor=100
 - 探测脚本：gtimg 日K容器可达性 + 不复权参数形态 + 北交支持性
 
+### 8.1 验收实录（2026-11-12 14:35-14:41 live，锚点日 2026-11-11；`tests/test_live_fupan_smoke.py` 4 passed）
+
+- F1 ✓ 三共享段（indices/breadth/fund_flow）数据 diff=0（排除 get_daily_review 设计内 notes 上浮到顶层的差异后逐段相等）
+- F2 ✓ 涨停 85 / 炸板 19 / 跌停 0（=文档锚点），zt count==len(items) 85==85
+- F3 ✓ 电子链（半导体/光学光电/元件/消费电子）limitup 9 / zhaban 0 / rate 0.0%（=文档 9/0/0.00%，成员含 002384 东山精密等 9 票）
+- F4 ✓ open_pct 一致性 offline 回放覆盖（test_board_quotes）；live scale 块返回 raw_f46=4940561 / raw_f60=4948534 / f59=2
+- F5 ✓ 002384 MA5/10/20 = 85.306/88.139/101.729（=文档），close=92.06，next_limit_down=82.854 = round(92.06×0.9,3)（14:35 首跑实测）
+- F6 △ 601595 三分类 −8544.59/−6003.25/3882.31 ✓（≈文档 −8545/−6003/3882）；002384 foreign 15041.44 ✓，但 inst/hot 实测 11350.94/20315.57 ✗ 文档 46991/10154——已逐行核对当日席位原始行（买：深股通 92232.79/机构专用×3/中金上海 20315.57；卖：深股通 77191.34/机构专用×4），三分类算术自洽，判为上游席位页相对文档取样时点已修订（取样疑在定稿前），非代码缺陷
+- F7 ✓ 冷启动 7.6s / 4.4s（两次全量实测，≤15s 目标）；缓存命中 0.0s（≤3s）
+- F8 offline-covered：断源降级（段级 unavailable/无 0 值冒充）由 offline 单测覆盖；live 不可模拟，本次 gtimg 反爬限流时段实测确认 klines 段按票 null + warnings 降级、无 0 值冒充
+- F9 ✓ v1 冻结生效（schema_version=v1，offline 断言）
+- A1 ✓ scale.divisor=100（元件板块 live 实测）
+- 备注1：14:40 起 gtimg fqkline 端点对本机返回 HTTP 501 反爬页（连续 3 次全池批量后触发）——F5 以 14:35 首跑为准；北交所票（920157）按设计落入 klines warnings
+- 备注2：dt 30d 标记 Task 6 已按实际窗口收口（>30 天才标 dt_pool_30d_limit）；11-11 在窗口内，dt 池正常返回 count=0
+
 ## 9. 任务分解（实施计划骨架）
 
 1. R1 补丁（scale/current）+ 契约扩展
