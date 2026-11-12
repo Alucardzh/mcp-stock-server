@@ -1,5 +1,7 @@
 """kline 指标单测：构造 130 根已知序列，断言 MA/pct/chg/涨跌停价精确值。"""
 
+import json
+
 import pandas as pd
 
 from utils import kline_metrics as km
@@ -84,3 +86,58 @@ def test_batch_klines_concurrent(monkeypatch):
     assert out["items"]["002384"]["close"] == 10.0
     assert out["items"]["999999"] is None
     assert any("999999" in w for w in out["warnings"])
+
+
+def test_batch_klines_envelope_flags(monkeypatch):
+    """spec §4.3：批量输出带 as_of/stale/cached，仅对 ok 结果聚合。"""
+    from utils.push2_client import EmResult
+
+    def fake_fetch(symbol, end_date, bars):
+        if symbol == "999999":
+            return EmResult(ok=False, reason="upstream_error")
+        return EmResult(
+            ok=True,
+            data=_df([10.0] * 130),
+            as_of=f"2026-11-12T14:3{symbol[-1]}:00",
+            cached=True,
+        )
+
+    monkeypatch.setattr(km, "fetch_kline", fake_fetch)
+    out = km.batch_klines(["002384", "601595", "999999"], "2026-11-11")
+    # as_of 取 ok 结果最大值；失败票不参与聚合
+    assert out["as_of"] == "2026-11-12T14:35:00"
+    assert out["stale"] is False
+    assert out["cached"] is True  # 全部 ok 结果均命中缓存
+
+
+def test_batch_klines_envelope_flags_stale_and_all_fail(monkeypatch):
+    """任一 ok 结果 stale → stale=True；全部失败 → as_of=""/stale=False/cached=False。"""
+    from utils.push2_client import EmResult
+
+    monkeypatch.setattr(
+        km,
+        "fetch_kline",
+        lambda symbol, end_date, bars: EmResult(
+            ok=True, data=_df([10.0] * 130), as_of="t", stale=True
+        ),
+    )
+    out = km.batch_klines(["002384"], "2026-11-11")
+    assert out["as_of"] == "t" and out["stale"] is True and out["cached"] is False
+
+    monkeypatch.setattr(
+        km,
+        "fetch_kline",
+        lambda symbol, end_date, bars: EmResult(ok=False, reason="upstream_error"),
+    )
+    out = km.batch_klines(["002384"], "2026-11-11")
+    assert out["as_of"] == "" and out["stale"] is False and out["cached"] is False
+
+
+def test_get_klines_batch_invalid_bars():
+    """helper 直调（绕开 mcp.tool 装饰链）：bars 非 20~1000 整数 → INVALID_ARG。"""
+    from mcp_tools.fupan import get_klines_batch
+
+    for bad_bars in ("abc", 10, 1001, None):
+        out = json.loads(get_klines_batch(["002384"], bad_bars, "2026-11-11"))
+        assert out["success"] is False and out["error_code"] == "INVALID_ARG", bad_bars
+        assert "bars 非法" in out["error"]

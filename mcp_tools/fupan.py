@@ -8,18 +8,16 @@ from utils.lhb_aggregate import lhb_aggregate
 from utils.review_common import json_err_code, json_ok, parse_day
 
 
-@mcp.tool()
-def get_klines_batch_tool(symbols: list[str], bars: int = 130, date: str = "") -> str:
-    """个股日K指标批量（不复权；MA5/10/20、pct60、chg5/10、涨跌停价）
+def get_klines_batch(symbols: list[str], bars: int = 130, date: str = "") -> str:
+    """get_klines_batch_tool 的纯函数体（测试直调，绕开 mcp.tool 装饰链）。
 
-    Args:
-        symbols: 6位代码列表（查不到的票该项为 null 并列入 warnings）
-        bars: 计算窗口，默认 130
-        date: 截至交易日 YYYY-MM-DD，默认今天
+    bars 校验与 fupan_v1 的 kline_bars 同口径（20~1000 整数）。
     """
     bad = [s for s in symbols if not (s.isdigit() and len(s) == 6)]
     if bad:
         return json_err_code("INVALID_ARG", f"代码格式非法: {bad}")
+    if not (isinstance(bars, int) and 20 <= bars <= 1000):
+        return json_err_code("INVALID_ARG", f"bars 非法: {bars!r}（20~1000 整数）")
     day = parse_day(date)
     if day is None:
         return json_err_code("INVALID_ARG", f"日期格式错误: {date}")
@@ -34,6 +32,18 @@ def get_klines_batch_tool(symbols: list[str], bars: int = 130, date: str = "") -
             **out,
         }
     )
+
+
+@mcp.tool()
+def get_klines_batch_tool(symbols: list[str], bars: int = 130, date: str = "") -> str:
+    """个股日K指标批量（不复权；MA5/10/20、pct60、chg5/10、涨跌停价）
+
+    Args:
+        symbols: 6位代码列表（查不到的票该项为 null 并列入 warnings）
+        bars: 计算窗口，20~1000 整数，默认 130
+        date: 截至交易日 YYYY-MM-DD，默认今天
+    """
+    return get_klines_batch(symbols, bars, date)
 
 
 @mcp.tool()

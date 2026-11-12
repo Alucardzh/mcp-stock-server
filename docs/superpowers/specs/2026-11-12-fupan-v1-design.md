@@ -162,6 +162,13 @@ boards 冷 10.5s（akproxy pacing，6+1 页）‖ klines ~4s（8 并发）‖ po
 - 备注1：14:40 起 gtimg fqkline 端点对本机返回 HTTP 501 反爬页（连续 3 次全池批量后触发）——F5 以 14:35 首跑为准；北交所票（920157）按设计落入 klines warnings
 - 备注2：dt 30d 标记 Task 6 已按实际窗口收口（>30 天才标 dt_pool_30d_limit）；11-11 在窗口内，dt 池正常返回 count=0
 
+#### v1 冻结面与 v2 §6.3 草案差异（终审回填）
+
+- indices.items 无 high/low/prev_close：v1 复用 indices_section 五字段（code/name/close/chg_pct/amount_yi），冻结于 v1；补字段须走 v2。
+- boards 行命名：v1 用 board_code/board_name/limit_up（v2 草案为 code/name/zt），设计已改用现行命名并冻结。
+- daily_review 把段 notes 上浮到顶层加 [段名] 前缀，fupan_v1 保留段内 notes——F1 对比需排除该差异（live 测试已体现）。
+- F6 锚点提示：v2 文档 002384 的 inst/hot 已过时（东财席位页取样后修订，见 8.1 F6 △），客户端验收改用实盘值或 601595 锚点。
+
 ## 9. 任务分解（实施计划骨架）
 
 1. R1 补丁（scale/current）+ 契约扩展

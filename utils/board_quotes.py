@@ -3,8 +3,10 @@
 
 上游 = 东财 push2（经 utils.push2_client → akproxy）：
 - clist/get m:90 板块列表（单页上限 100 行，pz>100 也只回 100 → pn 翻页拉全量）；
-- 板块 clist f17/f18 为非标刻度（约 ×1000），仅用于 open_pct 比值（刻度不变）；
-  原始 open/prev_close 以 stock/get 为准；
+- v2 实测：板块 clist f17/f18 == stock/get f46/f60 == 真实点位（如元件
+  prev_close=49485.34），并非非标刻度；get_boards 不外发 clist 原值属保守
+  策略，fupan_boards_section 直接外发（open/prev_close=_open/_prev_close）
+  为正确行为；
 - ulist.np/get 对板块 secid 的 f46/f60 返回 "-" 占位（不可用），fetch_board_open
   自动退化逐板块 stock/get（其 fields 必须全集，精简会"假失败"返回空 data——坑1）；
 - 开盘涨跌幅 = (f46-f60)/f60*100；f46 缺失（未开盘/停牌）→ open_pct=null + status=no_open。
@@ -190,7 +192,8 @@ def _fetch_open_stock_get(codes: list[str]) -> EmResult:
 
 
 def fetch_board_open(codes: list[str]) -> EmResult:
-    """板块开盘价/昨收（缓存 60s；data = {code: {open, prev_close}}）。
+    """板块开盘价/昨收（缓存 60s；data = {code: {open, prev_close, current, f59}}）。
+    current/f59 仅 stock/get 退化通道有值，ulist 通道恒为 None。
 
     优先 ulist 批量；ulist ok 但一行都没有 → 判定不支持板块 secid，进程内退化
     stock/get（真·上游失败 rate_limited/upstream_error 原样返回，不切通道）。

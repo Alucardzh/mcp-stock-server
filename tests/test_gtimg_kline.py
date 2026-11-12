@@ -1,6 +1,7 @@
 """gtimg 日K单测：URL 构造 / 响应解析 / 不复权键名 / 缓存（全 mock，无网络）。"""
 
 import json
+from datetime import datetime as real_datetime
 
 import pandas as pd
 import pytest
@@ -168,3 +169,34 @@ def test_fetch_kline_non_dict_payload(monkeypatch):
     monkeypatch.setattr(gk.KLINE_SESSION, "get", lambda *a, **kw: _resp([1, 2, 3]))
     res = gk.fetch_kline("002384", "2026-11-11", 130)
     assert not res.ok and res.reason == "upstream_error"
+
+
+def _fake_datetime(hour: int, minute: int):
+    """pinned now：_ttl 只用 datetime.now()，无需其余类方法。"""
+
+    class FakeDT:
+        @staticmethod
+        def now():
+            return real_datetime(2026, 11, 12, hour, minute)
+
+    return FakeDT
+
+
+def test_ttl_post_close_bump(monkeypatch):
+    """收盘后（≥15:05）当日 bar 已定稿 → 按历史 TTL；盘中（<15:05）保持短 TTL。
+
+    TTL 反转修复：当日 kline TTL(120) < fupan 整包 TTL(300) 时，整包每次过期
+    都重打全量 gtimg 批次，易触发反爬 501。
+    """
+    today = "2026-11-12"
+    # 盘中 / 边界前一分钟 → 短 TTL
+    for h, m in ((9, 30), (15, 4)):
+        monkeypatch.setattr(gk, "datetime", _fake_datetime(h, m))
+        assert gk._ttl(today) == gk._TODAY_TTL, f"{h}:{m:02d} 应为盘中短 TTL"
+    # 收盘后（含 15:05 边界）→ 当日按历史长期缓存
+    for h, m in ((15, 5), (23, 59)):
+        monkeypatch.setattr(gk, "datetime", _fake_datetime(h, m))
+        assert gk._ttl(today) == gk._HISTORY_TTL, f"{h}:{m:02d} 收盘后应为历史 TTL"
+    # 过去日期无论何时查询恒为历史 TTL（monkeypatch 撤销前的最后状态也覆盖）
+    monkeypatch.setattr(gk, "datetime", _fake_datetime(9, 30))
+    assert gk._ttl("2026-11-11") == gk._HISTORY_TTL

@@ -69,22 +69,32 @@ def compute_metrics(df: pd.DataFrame, name: str = "") -> dict:
 
 
 def _one(symbol: str, end_date: str, bars: int):
-    res = fetch_kline(symbol, end_date, bars)
-    if not res.ok or res.data is None or res.data.empty:
-        return symbol, None
-    return symbol, res.data  # attrs（symbol/name）由 fetch_kline 写入，此处只读
+    """单票取数：透传 fetch_kline 的 EmResult（含 ok/as_of/stale/cached 标志）。"""
+    return symbol, fetch_kline(symbol, end_date, bars)
 
 
 def batch_klines(symbols: list[str], end_date: str, bars: int = 130) -> dict:
-    """并发取数并算指标：{items: {code: dict|None}, warnings: [...]}（无 JSON 信封）。"""
+    """并发取数并算指标（无 JSON 信封）。
+
+    返回 {items: {code: dict|None}, warnings: [...], as_of, stale, cached}：
+    as_of/stale/cached 仅对 ok 结果聚合（spec §4.3 信封字段）——as_of 取最大值
+    （无 ok 结果为 ""），stale 任一为真，cached 须全部命中（无 ok 结果为 False）。
+    """
     symbols = sorted({s.strip() for s in symbols if s and s.strip()})
     with ThreadPoolExecutor(max_workers=_BATCH_WORKERS) as pool:
         results = list(pool.map(lambda s: _one(s, end_date, bars), symbols))
-    items, warnings = {}, []
-    for symbol, df in results:
-        if df is None:
+    items, warnings, ok_results = {}, [], []
+    for symbol, res in results:
+        if not res.ok or res.data is None or res.data.empty:
             items[symbol] = None
             warnings.append(f"{symbol} 日K获取失败")
             continue
-        items[symbol] = compute_metrics(df)
-    return {"items": items, "warnings": warnings}
+        items[symbol] = compute_metrics(res.data)
+        ok_results.append(res)
+    return {
+        "items": items,
+        "warnings": warnings,
+        "as_of": max((r.as_of for r in ok_results), default=""),
+        "stale": any(r.stale for r in ok_results),
+        "cached": bool(ok_results) and all(r.cached for r in ok_results),
+    }

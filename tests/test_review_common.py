@@ -63,6 +63,7 @@ def test_col_like():
 def test_json_err_code_extra_field():
     out = json.loads(rc.json_err_code("NOT_READY", "数据未就绪", expected_at="15:05"))
     assert out["success"] is False and out["error_code"] == "NOT_READY"
+    assert out["data"] is None  # 与 json_not_ready 信封族一致
     assert out["expected_at"] == "15:05"
 
 

@@ -96,7 +96,7 @@ def json_unavailable(reason: str) -> str:
 
 def json_err_code(code: str, msg: str, **extra) -> str:
     """业务错误（客户端不可重试类），带机器可读 error_code；extra 顶层并入。"""
-    payload = {"success": False, "error": msg, "error_code": code}
+    payload = {"success": False, "data": None, "error": msg, "error_code": code}
     payload.update(extra)
     return json.dumps(payload, ensure_ascii=False, indent=2)
 

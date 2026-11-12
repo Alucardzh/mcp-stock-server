@@ -3,7 +3,9 @@
 
 - param 末段为空 = 不复权（响应键 "day"；qfq 时为 "qfqday"）；
 - gtimg 非东财限流族，不经 push2 pacing，仅复用 Push2Cache 做缓存；
-- 历史 end_date 数据定稿 → TTL 86400；当日 bar 盘中会变 → TTL 120
+- 历史 end_date 数据定稿 → TTL 86400；当日 bar 盘中会变 → TTL 120，收盘后
+  （≥15:05）当日 bar 已定稿按历史长期缓存——否则整包（TTL 300）先于当日
+  kline（TTL 120）过期，每次过期都重打全量批次，易触发 gtimg 反爬 501
   （fupan_v1 的 NOT_READY 闸门在组装层，本层不管盘中语义）。
 """
 
@@ -34,7 +36,12 @@ def MKT_PREFIX(symbol: str) -> str:
 
 
 def _ttl(end_date: str) -> int:
-    return _TODAY_TTL if end_date == str(datetime.now().date()) else _HISTORY_TTL
+    if end_date != str(datetime.now().date()):
+        return _HISTORY_TTL
+    # 收盘后当日 bar 已定稿（fupan 的 NOT_READY 闸门挡住 15:02 前调用）；
+    # 盘中保持短 TTL，收盘后按历史长期缓存，避免整包缓存过期引发全量重拉
+    now = datetime.now()
+    return _HISTORY_TTL if (now.hour, now.minute) >= (15, 5) else _TODAY_TTL
 
 
 def fetch_kline(symbol: str, end_date: str, bars: int) -> EmResult:
