@@ -488,3 +488,46 @@ def test_fupan_boards_section_partial_degrade(monkeypatch):
     out = bq.fupan_boards_section()
     assert out["concept"] == {"status": "unavailable", "reason": "rate_limited"}
     assert out["industry"][0]["board_code"] == "BK0459"
+
+
+def _row(code, name, main_e8):
+    return {
+        "f12": code,
+        "f14": name,
+        "f2": 10.0,
+        "f3": 1.0,
+        "f17": "-",
+        "f18": 10.0,
+        "f62": main_e8,
+        "f104": 1,
+        "f105": 1,
+        "f128": "领涨",
+        "f140": "000001",
+        "f141": 9.9,
+    }
+
+
+def test_boards_offset_pagination(monkeypatch):
+    """limit 上限 200；offset 按 sort 排序后跳过前 N 条（分页取尾部数据）。"""
+    rows = [
+        _row("BK0459", "元件", 81.79e8),  # main_net 降序第 1
+        _row("BK1036", "半导体", 50.0e8),  # 第 2
+        _row("BK1044", "游戏Ⅱ", -5.0e8),  # 第 3
+    ]
+    _mock_upstream(
+        monkeypatch,
+        industry=EmResult(ok=True, data=_clist_payload(rows), as_of="t"),
+    )
+    monkeypatch.setattr(bq, "zt_industry_counts", lambda date="": None)
+    out = json.loads(bq.get_boards(scope="行业", sort="main_net", limit=1, offset=1))
+    d = out["data"]
+    assert d["offset"] == 1 and d["total"] == 3
+    assert [b["board_code"] for b in d["boards"]] == ["BK1036"]
+
+    # offset 越界 → 空列表（不报错），total 仍为全量
+    out2 = json.loads(bq.get_boards(scope="行业", offset=10))
+    assert out2["data"]["boards"] == [] and out2["data"]["total"] == 3
+
+    # limit>200 被钳制为 200（返回全部 3 条），offset<0 钳制为 0
+    out3 = json.loads(bq.get_boards(scope="行业", limit=300, offset=-5))
+    assert len(out3["data"]["boards"]) == 3 and out3["data"]["offset"] == 0

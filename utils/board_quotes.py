@@ -378,23 +378,26 @@ def get_boards(
     sort: str = "main_net",
     limit: int = 20,
     with_open: bool = True,
+    offset: int = 0,
 ) -> str:
     """查询板块清单排行（R2）：主力净流入/涨跌幅/开盘涨跌幅排序
 
     Args:
         scope: 行业（默认）/ 概念
         sort: main_net（默认）/ chg / open_pct
-        limit: 返回条数 ≤50，默认 20
+        limit: 返回条数 ≤200，默认 20
         with_open: 是否附带开盘涨跌幅（默认 true；false 省上游请求）。
             open_pct 用 clist f17/f18 比值（非标刻度，比值不受影响）；原始
             open/prev_close 仅在真实渠道（stock/get）有值时输出，否则 null。
+        offset: 按 sort 排序后跳过前 N 条（分页；越界返回空列表，钳制 ≥0）
     """
     try:
         if scope not in _SCOPE_FS:
             return json_err(f"scope 仅支持 行业/概念，当前: {scope}")
         if sort not in ("main_net", "chg", "open_pct"):
             return json_err(f"sort 仅支持 main_net/chg/open_pct，当前: {sort}")
-        limit = max(1, min(int(limit), 50))
+        limit = max(1, min(int(limit), 200))
+        offset = max(0, int(offset))
 
         snap = fetch_board_list(scope)
         if not snap.ok:
@@ -452,12 +455,14 @@ def get_boards(
         boards.sort(key=sort_key, reverse=True)
 
         counts = zt_industry_counts()
-        emit = [_emit_row(b, counts) for b in boards[:limit]]
+        emit = [_emit_row(b, counts) for b in boards[offset : offset + limit]]
         return json_ok(
             {
                 "scope": scope,
                 "sort": sort,
                 "total": snap.data["total"],
+                "offset": offset,
+                "limit": limit,
                 "boards": emit,
                 "notes": notes,
                 "as_of": snap.as_of,

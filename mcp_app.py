@@ -22,7 +22,7 @@ SERVER_INSTRUCTIONS = """A股行情与复盘数据服务器（东财数据源，
 
 【板块】
 - get_board_quote_tool(board_code|board_name)：单板块开盘涨跌幅/主力净流入/涨跌家数/领涨股/涨停家数；board_name 必须东财原文（如 游戏Ⅱ）；查不到=BOARD_NOT_FOUND（配置错），限流=status:unavailable（缺数据≠条件不达标，标待人工判），未开盘=no_open
-- get_boards_tool(scope, sort, limit, with_open)：行业/概念板块排行（main_net/chg/open_pct 排序）
+- get_boards_tool(scope, sort, limit≤200, offset, with_open)：行业/概念板块排行（main_net/chg/open_pct 排序；offset 按排序跳过前 N 条分页）
 
 【个股】
 - get_stock_realtime_tool / get_stock_history_tool / get_stock_basic_tool：实时快照 / 历史K线 / 基础信息

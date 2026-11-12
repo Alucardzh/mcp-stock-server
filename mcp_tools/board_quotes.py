@@ -21,13 +21,15 @@ def get_boards_tool(
     sort: str = "main_net",
     limit: int = 20,
     with_open: bool = True,
+    offset: int = 0,
 ) -> str:
     """查询板块清单排行：主力净流入/涨跌幅/开盘涨跌幅排序
 
     Args:
         scope: 行业（默认）/ 概念
         sort: main_net（默认）/ chg / open_pct
-        limit: 返回条数 ≤50，默认 20
+        limit: 返回条数 ≤200，默认 20
         with_open: 附带开盘涨跌幅（默认 true）
+        offset: 按 sort 排序后跳过前 N 条（分页取排行尾部；越界返回空列表）
     """
-    return get_boards(scope, sort, limit, with_open)
+    return get_boards(scope, sort, limit, with_open, offset)

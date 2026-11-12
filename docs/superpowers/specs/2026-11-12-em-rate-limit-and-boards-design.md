@@ -116,7 +116,8 @@ def em_push2_get(path: str, params: dict, *, cache_ttl: float | None = None) -> 
 
 **`get_boards_tool(scope="行业", sort="main_net", limit=20, with_open=true)`**（R2）
 
-- `scope`: `行业`/`概念`；`sort`: `main_net`/`chg`/`open_pct`；`limit ≤ 50`。
+- `scope`: `行业`/`概念`；`sort`: `main_net`/`chg`/`open_pct`；`limit ≤ 200`；
+  `offset ≥ 0`（按 sort 排序后跳过前 N 条，分页；2026-11-12 用户需求放宽 50→200 并新增）。
 - `with_open=false` 时跳过开盘价请求（省上游调用；open_pct 仍可用 clist f17/f18 比值）。
 - 板块清单接口失败：整个列表 `unavailable`；仅开盘价获取失败：返回列表 + note
   （`open_pct` 退化为 clist 比值口径）。
