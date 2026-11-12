@@ -7,6 +7,8 @@
 """
 
 from .etf import get_etf_daily
+from .gtimg_kline import fetch_kline
+from .kline_metrics import batch_klines, compute_metrics
 from .ths import get_ths_hot_list
 from .tools import (
     calculate_support_resistance_func,
@@ -32,6 +34,9 @@ from .lhb import get_lhb, get_lhb_seats
 __all__ = [
     "get_etf_daily",
     "get_ths_hot_list",
+    "fetch_kline",
+    "batch_klines",
+    "compute_metrics",
     "get_stock_history",
     "get_stock_realtime",
     "get_stock_basic",

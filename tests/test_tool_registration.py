@@ -16,3 +16,11 @@ def test_new_board_tools_registered():
 
 def test_utils_exports():
     from utils import get_board_quote, get_boards, get_zt_pool  # noqa: F401
+
+
+def test_klines_tool_registered():
+    from mcp_app import mcp
+    import mcp_tools  # noqa: F401
+
+    tools = asyncio.run(mcp.get_tools())
+    assert "get_klines_batch_tool" in set(tools)

@@ -108,3 +108,63 @@ def test_fetch_kline_cached(monkeypatch):
     r1 = gk.fetch_kline("002384", "2026-11-11", 130)
     r2 = gk.fetch_kline("002384", "2026-11-11", 130)
     assert counter["n"] == 1 and r2.cached and r1.as_of == r2.as_of
+
+
+def test_fetch_kline_writes_attrs(monkeypatch):
+    """T3 修订：attrs（symbol/name）在进缓存前一次性写入；name 取 qt 的 t__ 节点第 2 项。"""
+
+    def fake_get(url, params=None, timeout=None):
+        return _resp(
+            {
+                "code": 0,
+                "data": {
+                    "sz002384": {
+                        "day": [
+                            ["2026-11-11", "91.10", "92.06", "92.06", "91.00", "98000"],
+                        ],
+                        "qt": {"t__sz002384": ["1", "东山精密", "002384", "SZ"]},
+                    }
+                },
+            }
+        )
+
+    monkeypatch.setattr(gk.KLINE_SESSION, "get", fake_get)
+    res = gk.fetch_kline("002384", "2026-11-11", 130)
+    assert res.ok
+    assert res.data.attrs["symbol"] == "002384"
+    assert res.data.attrs["name"] == "东山精密"
+    # 缓存命中路径共享同一 DataFrame 引用 → attrs 仍在（消费方只读的前提）
+    res2 = gk.fetch_kline("002384", "2026-11-11", 130)
+    assert res2.cached and res2.data is res.data
+    assert res2.data.attrs["symbol"] == "002384"
+
+
+def test_fetch_kline_writes_attrs_no_qt(monkeypatch):
+    """响应无 qt 节点 → name 为空串，不抛异常。"""
+    monkeypatch.setattr(
+        gk.KLINE_SESSION,
+        "get",
+        lambda *a, **kw: _resp(
+            {
+                "code": 0,
+                "data": {
+                    "sz002384": {
+                        "day": [
+                            ["2026-11-11", "91.10", "92.06", "92.06", "91.00", "98000"],
+                        ]
+                    }
+                },
+            }
+        ),
+    )
+    res = gk.fetch_kline("002384", "2026-11-11", 130)
+    assert (
+        res.ok and res.data.attrs["name"] == "" and res.data.attrs["symbol"] == "002384"
+    )
+
+
+def test_fetch_kline_non_dict_payload(monkeypatch):
+    """T3 修订：JSON 非 dict（如列表）不外抛 AttributeError，进 upstream_error。"""
+    monkeypatch.setattr(gk.KLINE_SESSION, "get", lambda *a, **kw: _resp([1, 2, 3]))
+    res = gk.fetch_kline("002384", "2026-11-11", 130)
+    assert not res.ok and res.reason == "upstream_error"

@@ -7,6 +7,7 @@ from . import (  # noqa: F401
     board_quotes,
     derivatives,
     funds,
+    fupan,
     global_markets,
     lhb,
     meta,

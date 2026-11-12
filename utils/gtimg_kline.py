@@ -24,7 +24,8 @@ _HISTORY_TTL = 86400
 
 
 def MKT_PREFIX(symbol: str) -> str:
-    """6 位代码 → 腾讯市场前缀（sh/sz）。北交 8/4/92 开头返回 'bj'（支持性以探测为准）。"""
+    """6 位代码 → 腾讯市场前缀（sh/sz）。"9" 已先于北交分支匹配 → 92 开头实际返回 sh；
+    北交 8/4 开头返回 'bj'（支持性以探测为准）。"""
     if symbol.startswith(("6", "68", "9")):
         return f"sh{symbol}"
     if symbol.startswith(("8", "4")):
@@ -37,7 +38,8 @@ def _ttl(end_date: str) -> int:
 
 
 def fetch_kline(symbol: str, end_date: str, bars: int) -> EmResult:
-    """单票不复权日K（缓存；data = DataFrame[日期,开盘,收盘,最高,最低,成交量] 升序）。"""
+    """单票不复权日K（缓存；data = DataFrame[日期,开盘,收盘,最高,最低,成交量] 升序，
+    attrs 带 symbol/name——进缓存前一次性写入，消费方只读）。"""
     key = f"kline:{symbol}:{end_date}:{bars}"
 
     def _fetch() -> EmResult:
@@ -55,8 +57,11 @@ def fetch_kline(symbol: str, end_date: str, bars: int) -> EmResult:
         except Exception as e:  # noqa: BLE001
             logger.warning("gtimg kline %s failed: %s", symbol, e)
             return EmResult(ok=False, reason="upstream_error")
-        node = (payload.get("data") or {}).get(sym) or {}
-        rows = node.get("day") or node.get("qfqday") or []
+        data = payload.get("data") if isinstance(payload, dict) else None
+        node = (data or {}).get(sym) or {}
+        rows = (
+            node.get("day") or node.get("qfqday") or []
+        )  # 兜底防御性：不复权主键恒为 "day"
         if not rows:
             return EmResult(ok=False, reason="upstream_error")
         df = pd.DataFrame(
@@ -65,6 +70,13 @@ def fetch_kline(symbol: str, end_date: str, bars: int) -> EmResult:
                 for r in rows
             ],
             columns=["日期", "开盘", "收盘", "最高", "最低", "成交量"],
+        )
+        # attrs 在进缓存前一次性写入；消费方只读（缓存 DataFrame 引用共享，T2 审查 Important）
+        qt = node.get("qt") or {}
+        t = next((v for k, v in qt.items() if str(k).startswith("t__")), None)
+        df.attrs["symbol"] = symbol
+        df.attrs["name"] = (
+            str(t[1]) if isinstance(t, (list, tuple)) and len(t) > 1 else ""
         )
         return EmResult(ok=True, data=df, as_of=now_iso())
 
