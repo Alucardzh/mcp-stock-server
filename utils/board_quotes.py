@@ -22,7 +22,6 @@ from .review_common import (
     json_err_code,
     json_ok,
     json_unavailable,
-    parse_day,
 )
 from .review_market import zt_industry_counts
 from .tools import RateLimiter
@@ -33,7 +32,7 @@ BOARD_LIST_TTL = 60.0  # 板块清单缓存（秒）
 BOARD_OPEN_TTL = 60.0  # 开盘价缓存（秒）
 _ULIST_CHUNK = 100  # GET URL 长度安全分块
 _CLIST_PAGE_SIZE = 100  # clist 单页行数上限（实测 pz>100 也只回 100）
-_CLIST_MAX_PAGES = 8  # 翻页安全上限（概念 ~496 板块 → 5 页）
+_CLIST_MAX_PAGES = 8  # 翻页安全上限（概念实测 531 板块 → 6 页（8 页上限容许到 800））
 _OPEN_BATCH_MAX_MISSING = 20  # R2 批量开盘请求的缺口上限（超过则跳过，见 get_boards）
 
 ulist_ok: bool | None = (
@@ -266,6 +265,11 @@ def get_board_quote(board_code: str = "", board_name: str = "") -> str:
 
         row, scope = _lookup(snaps, code, name)
         if row is None:
+            if any(not s.ok for s in snaps):
+                # 单 scope 快照失败：板块可能在缺失的那组里，缺数据≠不存在
+                return json_unavailable(
+                    next((s.reason for s in snaps if not s.ok), "upstream_error")
+                )
             return json_err_code("BOARD_NOT_FOUND", f"板块不存在: {code or name}")
         primary = next(s for s in snaps if s.ok and s.data["scope"] == scope)
 

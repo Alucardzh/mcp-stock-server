@@ -105,8 +105,8 @@ def em_push2_get(path: str, params: dict, *, cache_ttl: float | None = None) -> 
 
 **`get_board_quote_tool(board_code: str = "", board_name: str = "")`**（R1，最高优先）
 
-- 都不给 → 返回全部行业+概念板块精简表，行结构与 `get_boards_tool` 的 `boards[]` 一致
-  （复用同一快照，含行业+概念两组）。
+- 都不给 → 返回全部行业+概念板块精简表（scope/board_code/board_name/current_pct/main_net_yi
+  五字段，按当前涨跌幅降序）。
 - 查不到板块 → `success:false, error_code:"BOARD_NOT_FOUND"`。
 - f46 为空（未开盘/停牌）→ `data.open_pct=null, status:"no_open"`。
 - `board_name` **原文透传**（含 `游戏Ⅱ` 罗马数字、`自动化设` 截断名，不做规范化/补全）。

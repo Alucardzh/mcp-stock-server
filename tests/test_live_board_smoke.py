@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from utils import get_board_quote, get_board_quote as _gbq, get_boards, get_zt_pool
+from utils import get_board_quote, get_boards, get_zt_pool
 
 
 @pytest.mark.live

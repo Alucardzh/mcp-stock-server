@@ -135,6 +135,19 @@ def test_board_quote_not_found(monkeypatch):
     assert out["success"] is False and out["error_code"] == "BOARD_NOT_FOUND"
 
 
+def test_board_quote_partial_scope_miss_unavailable(monkeypatch):
+    """行业快照 ok + 概念快照失败：查概念侧板块名 → unavailable(rate_limited)
+    而非 BOARD_NOT_FOUND（缺数据≠条件不达标；rate-limit 恰在概念侧生效的常见形态）。"""
+    _mock_upstream(
+        monkeypatch,
+        industry=EmResult(ok=True, data=_clist_payload([_ROW_YUANJIAN]), as_of="t"),
+        concept=EmResult(ok=False, reason="rate_limited"),
+    )
+    out = json.loads(bq.get_board_quote(board_name="人工智能"))
+    assert out["success"] is True and out["data"] is None
+    assert out["status"] == "unavailable" and out["reason"] == "rate_limited"
+
+
 def test_board_quote_unavailable(monkeypatch):
     """A2：上游限流 → success:true + data:null + status:unavailable，不抛错。"""
     _mock_upstream(
