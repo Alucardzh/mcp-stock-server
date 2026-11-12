@@ -438,6 +438,8 @@ def get_board_members(board_code: str, limit: int = 100, offset: int = 0) -> str
                 rows.extend(diff)
                 if len(diff) < _MEMBERS_PAGE:
                     break
+                if total and len(rows) >= total:
+                    break  # 恰好整页凑满：下一页必空 data→rate_limited，免打
             if total == 0:
                 # 空成分股 = 无效板块代码（不缓存，便于新板块代码日后生效）
                 return EmResult(ok=False, reason="not_found")

@@ -734,3 +734,36 @@ def test_board_members_not_found(monkeypatch):
     monkeypatch.setattr(bq, "em_push2_get", fake)
     out = json.loads(bq.get_board_members("BK9999"))
     assert out["success"] is False and out["error_code"] == "BOARD_NOT_FOUND"
+
+
+def test_board_members_exact_page_count_stops(monkeypatch):
+    """total=200 恰为 2 整页：第 2 页满页后按 total 停止，
+    不请求必空的第 3 页（旧行为：空页→rate_limited→整个查询失败）。"""
+
+    def _member_rows(prefix: str, n: int):
+        return [
+            {"f12": f"{prefix}{i:02d}", "f14": f"股{i}", "f2": 10.0, "f3": 1.0}
+            for i in range(n)
+        ]
+
+    pages = [_member_rows("6000", 100), _member_rows("6010", 100)]
+    calls = {"pns": []}
+
+    def fake(path, params):
+        assert path == "/api/qt/clist/get" and params.get("fs") == "b:BK0459"
+        pn = int(params.get("pn", 1))
+        calls["pns"].append(pn)
+        assert pn <= len(pages), f"unexpected page {pn}"
+        return EmResult(
+            ok=True,
+            data={"total": sum(len(p) for p in pages), "diff": pages[pn - 1]},
+            as_of="t",
+        )
+
+    monkeypatch.setattr(bq, "em_push2_get", fake)
+    out = json.loads(bq.get_board_members("BK0459"))
+    assert out["success"], out
+    d = out["data"]
+    assert d["count"] == 200 and len(d["items"]) == 100
+    assert d["has_more"] is True and d["next_offset"] == 100
+    assert calls["pns"] == [1, 2]  # 无第 3 次请求
