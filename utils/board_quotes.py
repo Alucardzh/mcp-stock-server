@@ -19,6 +19,7 @@ limit_up（板块内涨停家数）来自涨停池所属行业分桶（review_ma
 import json
 import logging
 from datetime import datetime
+from os import getenv
 
 from .push2_client import CACHE, EmResult, em_push2_get, now_iso
 from .review_common import (
@@ -32,7 +33,17 @@ from .tools import RateLimiter
 
 logger = logging.getLogger(__name__)
 
-BOARD_LIST_TTL = 60.0  # 板块清单缓存（秒）
+
+def _env_int(name: str, default: int) -> int:
+    """入口限流配额 env 覆写（v4 §11.1-3①：阈值可配置）；非法回退默认。"""
+    try:
+        return max(1, int(getenv(name, str(default))))
+    except ValueError:
+        return default
+
+
+# 板块清单缓存（秒）：60→300——拉全量分页后 TTL 过短导致重复冷取（v4 §11.1-3③）
+BOARD_LIST_TTL = float(getenv("EM_BOARD_LIST_TTL", "300") or 300)
 BOARD_OPEN_TTL = 60.0  # 09:25 前：竞价虚拟撮合价仍在变
 BOARD_OPEN_TTL_POST = 3600.0  # 09:25 后：开盘价当日定稿（prev_close 恒不变）
 _ULIST_CHUNK = 100  # GET URL 长度安全分块
@@ -397,7 +408,7 @@ _MEMBERS_PAGE = 100
 _MEMBERS_MAX_PAGES = 20  # 2000 只安全阀（最大板块~500 成分股）
 
 
-@RateLimiter(max_calls=10, time_window=60)
+@RateLimiter(max_calls=_env_int("EM_RATE_BOARD_MEMBERS", 20), time_window=60)
 def get_board_members(board_code: str, limit: int = 100, offset: int = 0) -> str:
     """板块成分股清单（G6）：分页 + 当日缓存 + truncated 标记
 
@@ -489,7 +500,7 @@ def get_board_members(board_code: str, limit: int = 100, offset: int = 0) -> str
         return json_err(f"查询板块成分股失败: {e}")
 
 
-@RateLimiter(max_calls=20, time_window=60)
+@RateLimiter(max_calls=_env_int("EM_RATE_BOARD_QUOTE", 40), time_window=60)
 def get_board_quote(
     board_code: str = "", board_name: str = "", fields: list[str] = []
 ) -> str:
@@ -618,7 +629,7 @@ def _boards_digest(snaps: list[EmResult]) -> str:
     )
 
 
-@RateLimiter(max_calls=20, time_window=60)
+@RateLimiter(max_calls=_env_int("EM_RATE_BOARDS", 40), time_window=60)
 def get_boards(
     scope: str = "行业",
     sort: str = "main_net",

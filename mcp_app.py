@@ -21,7 +21,7 @@ SERVER_INSTRUCTIONS = """A股行情与复盘数据服务器（东财数据源，
 - get_market_breadth_tool(date)：涨跌家数（仅当日）+ 涨跌停/炸板家数 + 连板梯队
 
 【板块】
-- get_board_quote_tool(board_code|board_name, fields?)：单板块行情；board_name 支持原文精确与 4 字截断前缀匹配（唯一命中标 matched_by，多命中 status:"ambiguous"+candidates）；fields 轻量模式（{open,prev_close,open_pct,current} 子集+board_code，秒级）；查不到=BOARD_NOT_FOUND，限流=unavailable，未开盘=no_open
+- get_board_quote_tool(board_code|board_name, fields?)：单板块行情；board_name 支持原文精确与 4 字截断前缀匹配（唯一命中标 matched_by，多命中 status:"ambiguous"+candidates）；fields 为 **list[str]**（如 ["open","open_pct"]，取值 ∈ {open,prev_close,open_pct,current}，须配 board_code，秒级）；无 scope 参数（内部行业快照优先、命中即不拉概念）；查不到=BOARD_NOT_FOUND，限流=unavailable，未开盘=no_open
 - get_boards_tool(scope, sort, limit≤600, offset, with_open)：行业/概念排行；sort=main_net/chg/open_pct（降序）或 code/name（字典序升序，翻页全量拉取）；响应带 has_more/next_offset
 - get_board_members_tool(board_code, limit, offset)：板块成分股（当日缓存，items=[code,name,price,chg_pct]）
 - warmup_board_cache_tool(board_codes?)：竞价前预热清单/开盘价/涨停池分桶

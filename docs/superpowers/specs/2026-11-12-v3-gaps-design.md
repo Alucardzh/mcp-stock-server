@@ -71,3 +71,16 @@
 
 - 附加确认：BK0481 行业名即"汽车零部件"（前缀/精确一致）；live 套件 5/5 passed（29.68s）；离线套件 199 passed / 17 deselected。
 - G3/G4 无需改动（§1 裁定），未纳入实测。
+
+## 5. v4 §11.1 复核三点处置（2026-11-12 晚）
+
+1. **quote 无 scope 参数**：确认设计——lazy scope 为内部行为（行业快照优先，命中即不拉概念；未命中/多命中才拉概念重扫），工具层无 scope 入参。客户端"不传 scope"用法正确。
+2. **fields 签名**：`fields: list[str] = []`（pydantic 强制列表）；SERVER_INSTRUCTIONS 已改为明确 list[str] 写法。
+3. **入口限流触发**：客户端测试序列打满 quote 桶 20/60s（等 19.6s=窗口已积 20 次）。处置：
+   - `get_board_quote`/`get_boards` 上限 20→**40**、`get_board_members` 10→**20**，均可 env 覆写
+     （`EM_RATE_BOARD_QUOTE` / `EM_RATE_BOARDS` / `EM_RATE_BOARD_MEMBERS`，compose 已透传）；
+     上游安全不受影响——pacing 1.5s 仍全局串行（≤40 请求/min）。
+   - `warmup_board_cache_tool` 确认无限流器（客户端实测 12 板块 2.5s 印证）。
+   - 板块清单 TTL 60→**300s**（`EM_BOARD_LIST_TTL` 可调）：消除"拉全量后 60s 就过期又冷取 7.3s"。
+     open_pct 由开盘价通道（分时 TTL）提供，不受清单 TTL 影响；盘中 current_pct/main_net
+     新鲜度降至 ≤5 分钟（竞价决策消费的是 open_pct，不受影响）。

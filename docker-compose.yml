@@ -15,6 +15,10 @@ services:
       - AKPROXY_TOKEN=${AKPROXY_TOKEN:-}
       - YAHOO_PROXY=${YAHOO_PROXY:-}
       - EM_PUSH2_MIN_INTERVAL=${EM_PUSH2_MIN_INTERVAL:-1.5}
+      - EM_RATE_BOARD_QUOTE=${EM_RATE_BOARD_QUOTE:-40}
+      - EM_RATE_BOARDS=${EM_RATE_BOARDS:-40}
+      - EM_RATE_BOARD_MEMBERS=${EM_RATE_BOARD_MEMBERS:-20}
+      - EM_BOARD_LIST_TTL=${EM_BOARD_LIST_TTL:-300}
       - AUCTION_ARCHIVE_ROOT=/app/data/auction
     restart: unless-stopped
     networks:
