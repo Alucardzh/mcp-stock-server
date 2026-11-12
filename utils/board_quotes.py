@@ -466,3 +466,33 @@ def get_boards(
     except Exception as e:  # noqa: BLE001
         logger.error("Error in get_boards: %s", e)
         return json_err(f"查询板块清单失败: {e}")
+
+
+def fupan_boards_section() -> dict | None:
+    """fupan_v1 boards 段：行业+概念全量行（无 limit 截断），open_pct 为 clist 比值。
+
+    行 = _emit_row 形态 + open/prev_close(常为 None) + open_pct。
+    单 scope 失败 → 该 scope 为 {"status":"unavailable","reason"}；双失败 → None。
+    """
+    snaps = {"industry": fetch_board_list("行业"), "concept": fetch_board_list("概念")}
+    if not any(s.ok for s in snaps.values()):
+        return None
+    counts = zt_industry_counts()
+    out = {"as_of": "", "stale": False, "cached": True, "source": _SOURCE}
+    for scope, s in snaps.items():
+        if not s.ok:
+            out[scope] = {
+                "status": "unavailable",
+                "reason": s.reason or "upstream_error",
+            }
+            continue
+        boards = [dict(b) for b in s.data["boards"]]  # 缓存引用共享，先拷贝
+        for b in boards:
+            b["open"] = b["_open"]
+            b["prev_close"] = b["_prev_close"]
+            b["open_pct"] = _open_pct(b["_open"], b["_prev_close"])
+        out[scope] = [_emit_row(b, counts) for b in boards]
+        out["as_of"] = max(out["as_of"], s.as_of)
+        out["stale"] = out["stale"] or s.stale
+        out["cached"] = out["cached"] and s.cached
+    return out

@@ -253,3 +253,37 @@ def test_zt_industry_counts_failure_returns_none(monkeypatch):
 
     monkeypatch.setitem(rm.POOL_FETCHERS, "涨停", boom)
     assert rm.zt_industry_counts("2026-11-12") is None
+
+
+# ---- Task5 fupan_v1: 严格日期池快照 / 通用行业分桶 / zhaban_rate ----
+
+
+def test_pool_full_snapshot_strict_date(monkeypatch):
+    """严格日期：当日空池不回退（与 get_zt_pool 的回退行为相反）。"""
+    monkeypatch.setitem(rm.POOL_FETCHERS, "涨停", lambda date: _pool_df(3))
+    snap = rm.pool_full_snapshot("涨停", date(2026, 11, 12))
+    assert snap and snap["count"] == 3 and snap["truncated"] is False
+    assert snap["items"][0]["code"].startswith("600")  # 键名已映射为英文
+    assert snap["items"][0]["hybk"] in ("元件", "半导体")
+
+
+def test_pool_full_snapshot_empty_returns_none(monkeypatch):
+    monkeypatch.setitem(rm.POOL_FETCHERS, "涨停", lambda date: pd.DataFrame())
+    assert rm.pool_full_snapshot("涨停", date(2026, 11, 16)) is None
+
+
+def test_industry_counts_generic(monkeypatch):
+    df = _pool_df(6)  # 元件3 半导体3
+    monkeypatch.setitem(rm.POOL_FETCHERS, "涨停", lambda date: df)
+    monkeypatch.setitem(rm.POOL_FETCHERS, "炸板", lambda date: df)
+    assert rm.industry_counts("涨停", date(2026, 11, 12)) == {"元件": 3, "半导体": 3}
+    assert rm.industry_counts("炸板", date(2026, 11, 12)) == {"元件": 3, "半导体": 3}
+
+
+def test_breadth_zhaban_rate(monkeypatch):
+    monkeypatch.setitem(rm.POOL_FETCHERS, "涨停", lambda date: _pool_df(10))
+    monkeypatch.setitem(rm.POOL_FETCHERS, "炸板", lambda date: _pool_df(2))
+    monkeypatch.setitem(rm.POOL_FETCHERS, "跌停", lambda date: pd.DataFrame())
+    out = rm.breadth_section(date(2026, 11, 12))
+    assert out["limit_up"] == 10 and out["zhaban"] == 2
+    assert abs(out["zhaban_rate"] - round(2 / 12 * 100, 2)) < 1e-9

@@ -458,3 +458,33 @@ def test_board_list_exact_page_count_stops(monkeypatch):
     assert out["success"], out
     assert out["data"]["total"] == 200
     assert calls["pns"] == [1, 2]  # 无第 3 次请求
+
+
+# ---- Task5 fupan_v1: boards 全量段（行业+概念，无 limit 截断） ----
+
+
+def test_fupan_boards_section(monkeypatch):
+    _mock_upstream(
+        monkeypatch,
+        industry=EmResult(ok=True, data=_clist_payload([_ROW_YUANJIAN]), as_of="t"),
+        concept=EmResult(ok=True, data=_clist_payload([_ROW_YOUXI]), as_of="t"),
+    )
+    monkeypatch.setattr(bq, "zt_industry_counts", lambda date="": {"元件": 5})
+    out = bq.fupan_boards_section()
+    assert out["industry"][0]["board_code"] == "BK0459"
+    assert out["industry"][0]["limit_up"] == 5
+    assert "open_pct" in out["concept"][0]  # clist 比值口径（f17='-' → None）
+
+
+def test_fupan_boards_section_partial_degrade(monkeypatch):
+    _mock_upstream(
+        monkeypatch,
+        industry=EmResult(ok=True, data=_clist_payload([_ROW_YUANJIAN]), as_of="t"),
+        concept=EmResult(ok=False, reason="rate_limited"),
+    )
+    # 本文件契约"无网络"：真实 zt_industry_counts 会打 akshare 且污染共享
+    # PUSH2_CACHE（pool:涨停:今日 会串进 test_review_market 的当日用例）
+    monkeypatch.setattr(bq, "zt_industry_counts", lambda date="": None)
+    out = bq.fupan_boards_section()
+    assert out["concept"] == {"status": "unavailable", "reason": "rate_limited"}
+    assert out["industry"][0]["board_code"] == "BK0459"

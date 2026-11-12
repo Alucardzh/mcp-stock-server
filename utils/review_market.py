@@ -240,6 +240,7 @@ def breadth_section(day: date_type) -> dict:
         "limit_up": None,
         "limit_down": None,
         "zhaban": None,
+        "zhaban_rate": None,
         "max_lianban": None,
         "lianban_dist": None,
     }
@@ -257,6 +258,9 @@ def breadth_section(day: date_type) -> dict:
         df = _pool_cached(pool, day)[0]
         if df is not None:
             out[key] = 0 if df.empty else len(df)
+    if out["limit_up"] is not None and out["zhaban"]:
+        denom = out["limit_up"] + out["zhaban"]
+        out["zhaban_rate"] = round(out["zhaban"] / denom * 100, 2) if denom else None
     if day == datetime.now().date():
         try:
             spot = _get_spot()
@@ -344,17 +348,76 @@ def get_zt_pool(pool: str = "涨停", date: str = "", full: bool = False) -> str
         return json_err(f"查询{pool}股池失败: {e}")
 
 
-def zt_industry_counts(date: str = "") -> dict | None:
-    """涨停池按所属行业分桶计数（行业名为东财 4 字截断原文）。
+_POOL_KEY_MAP = {
+    "代码": "code",
+    "名称": "name",
+    "涨跌幅": "chg_pct",
+    "最新价": "price",
+    "成交额": "amount_yi",
+    "换手率": "turnover_pct",
+    "封板资金": "seal_amount_yi",
+    "首次封板时间": "first_seal",
+    "最后封板时间": "last_seal",
+    "炸板次数": "zhaban_count",
+    "连板数": "lianban",
+    "所属行业": "hybk",
+    "封单资金": "seal_amount_yi",
+    "板上成交额": "board_amount_yi",
+    "连续跌停": "lianban_dt",
+    "开板次数": "open_count",
+    "涨停统计": "zt_stat",
+}
 
-    供板块行情计算 limit_up（板块内涨停家数）；失败/无数据返回 None，
-    调用方省略字段即可，不报错。缓存跟随三池当日 TTL。
+
+def pool_full_snapshot(pool: str, day: date_type) -> dict | None:
+    """严格日期（不回退）三池 full 行快照，键名映射为 v2 英文；空池/失败 None。
+
+    fupan_v1 专用：NOT_TRADE_DAY 判定与段级降级在组装层。
     """
-    day = parse_day(date) or datetime.now().date()
+    df, as_of, cached, stale = _pool_cached(pool, day)
+    if df is None or df.empty:
+        return None
+    fields = [c for c in _POOL_FIELDS.get(pool, []) if c in df.columns]
+    items = []
+    for _, r in df.iterrows():
+        row = {}
+        for c in fields:
+            v = r[c]
+            if c in MONEY_FIELDS:
+                v = safe_num(float(v) / 1e8, 2)
+            elif c in ("涨跌幅", "换手率"):
+                v = safe_num(v, 2)
+            row[_POOL_KEY_MAP.get(c, c)] = v
+        items.append(row)
+    return {
+        "pool": pool,
+        "date": str(day),
+        "count": len(df),
+        "truncated": False,
+        "items": items,
+        "as_of": as_of,
+        "cached": cached,
+        "stale": stale,
+        "source": "eastmoney_push2ex",
+        "notes": [],
+    }
+
+
+def industry_counts(pool: str, day: date_type) -> dict | None:
+    """三池按所属行业分桶计数（通用版；行业名为东财 4 字截断原文）。"""
     try:
-        df = _pool_cached("涨停", day)[0]
+        df = _pool_cached(pool, day)[0]
         if df is None or df.empty or "所属行业" not in df.columns:
             return None
         return {str(k): int(v) for k, v in df["所属行业"].value_counts().items()}
     except Exception:  # noqa: BLE001
         return None
+
+
+def zt_industry_counts(date: str = "") -> dict | None:
+    """涨停池行业分桶（industry_counts 的涨停薄封装，保留旧签名）。
+
+    供板块行情计算 limit_up（板块内涨停家数）；失败/无数据返回 None，
+    调用方省略字段即可，不报错。缓存跟随三池当日 TTL。
+    """
+    return industry_counts("涨停", parse_day(date) or datetime.now().date())
