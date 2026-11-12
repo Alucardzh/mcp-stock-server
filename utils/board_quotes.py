@@ -154,7 +154,12 @@ def _fetch_open_ulist(codes: list[str]) -> EmResult:
             code = str(r.get("f12", ""))
             open_, prev = _f(r.get("f46")), _f(r.get("f60"))
             if code and (open_ is not None or prev is not None):
-                merged[code] = {"open": open_, "prev_close": prev}
+                merged[code] = {
+                    "open": open_,
+                    "prev_close": prev,
+                    "current": None,
+                    "f59": None,
+                }
     return EmResult(ok=True, data=merged, as_of=as_of)
 
 
@@ -175,7 +180,12 @@ def _fetch_open_stock_get(codes: list[str]) -> EmResult:
             return res
         as_of = as_of or res.as_of
         d = res.data or {}
-        merged[c] = {"open": _f(d.get("f46")), "prev_close": _f(d.get("f60"))}
+        merged[c] = {
+            "open": _f(d.get("f46")),
+            "prev_close": _f(d.get("f60")),
+            "current": _f(d.get("f43")),
+            "f59": _int_or_none(d.get("f59")),
+        }
     return EmResult(ok=True, data=merged, as_of=as_of)
 
 
@@ -230,6 +240,21 @@ def _open_pct(open_: float | None, prev: float | None) -> float | None:
     if open_ is None or not prev:
         return None
     return round((open_ - prev) / prev * 100, 3)
+
+
+def _scale_block(openq: dict) -> dict | None:
+    """缩放核对块：fltt=2 值已格式化，raw = round(value × 10^f59) 无损重建。"""
+    f59 = openq.get("f59")
+    open_, prev = openq.get("open"), openq.get("prev_close")
+    if f59 is None or open_ is None or prev is None:
+        return None
+    divisor = 10 ** int(f59)
+    return {
+        "raw_f46": int(round(open_ * divisor)),
+        "raw_f60": int(round(prev * divisor)),
+        "divisor": divisor,
+        "f59": int(f59),
+    }
 
 
 def _lookup(snaps: list[EmResult], code: str, name: str):
@@ -295,6 +320,8 @@ def get_board_quote(board_code: str = "", board_name: str = "") -> str:
                 "as_of": primary.as_of,
                 "stale": primary.stale or open_res.stale,
                 "cached": primary.cached,
+                "current": openq.get("current"),
+                "scale": _scale_block(openq),
                 "source": _SOURCE,
             }
         )

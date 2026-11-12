@@ -94,10 +94,23 @@ def json_unavailable(reason: str) -> str:
     )
 
 
-def json_err_code(code: str, msg: str) -> str:
-    """业务错误（客户端不可重试类），带机器可读 error_code。"""
+def json_err_code(code: str, msg: str, **extra) -> str:
+    """业务错误（客户端不可重试类），带机器可读 error_code；extra 顶层并入。"""
+    payload = {"success": False, "error": msg, "error_code": code}
+    payload.update(extra)
+    return json.dumps(payload, ensure_ascii=False, indent=2)
+
+
+def json_not_ready(expected_at: str) -> str:
+    """整日数据未就绪（如收盘前调 fupan_v1）：客户端应稍后重试。"""
     return json.dumps(
-        {"success": False, "error": msg, "error_code": code},
+        {
+            "success": False,
+            "data": None,
+            "error": f"当日数据未就绪，预计 {expected_at} 后可用",
+            "error_code": "NOT_READY",
+            "expected_at": expected_at,
+        },
         ensure_ascii=False,
         indent=2,
     )

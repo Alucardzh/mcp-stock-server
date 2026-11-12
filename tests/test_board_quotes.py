@@ -421,6 +421,32 @@ def test_boards_open_fetch_failure_note_clist_ratio(monkeypatch):
     assert abs(by_code["BK601"]["open_pct"] - (50.0 - 49.4854) / 49.4854 * 100) < 0.01
 
 
+def test_board_quote_scale_block(monkeypatch):
+    """R1 补丁：输出带 current 点位与 scale 块（raw=value×10^f59 无损重建）。"""
+    _mock_upstream(
+        monkeypatch,
+        industry=EmResult(ok=True, data=_clist_payload([_ROW_YUANJIAN]), as_of="t"),
+        concept=EmResult(ok=True, data=_clist_payload([]), as_of="t"),
+        # ulist 对板块 secid 返回 '-' 空结果（ok 但 0 行）→ 退化 stock/get 通道
+        ulist=EmResult(ok=True, data={"diff": []}, as_of="t"),
+        stock_get=EmResult(
+            ok=True,
+            data={"f43": 51000.0, "f46": 49405.61, "f60": 49485.34, "f59": 2},
+            as_of="t",
+        ),
+    )
+    monkeypatch.setattr(bq, "zt_industry_counts", lambda date="": None)
+    out = json.loads(bq.get_board_quote(board_name="元件"))
+    d = out["data"]
+    assert d["current"] == 51000.0
+    assert d["scale"] == {
+        "raw_f46": 4940561,
+        "raw_f60": 4948534,
+        "divisor": 100,
+        "f59": 2,
+    }
+
+
 def test_board_list_exact_page_count_stops(monkeypatch):
     """total=200 恰为 2 整页：第 2 页满页后按 upstream_total 停止，
     不请求必空的第 3 页（旧行为：空页→rate_limited→整个快照失败）。"""

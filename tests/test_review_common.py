@@ -23,7 +23,9 @@ def test_json_envelope():
 
 
 def test_json_ok_sanitizes_nan_inf():
-    out = rc.json_ok({"a": float("nan"), "b": [1.0, float("inf")], "c": {"d": float("-inf")}})
+    out = rc.json_ok(
+        {"a": float("nan"), "b": [1.0, float("inf")], "c": {"d": float("-inf")}}
+    )
     assert "NaN" not in out and "Infinity" not in out
     assert '"a": null' in out and '"d": null' in out
     # indent=2 下列表多行展开，改用解析校验（更严格：同时证明输出是合法 JSON）
@@ -56,3 +58,15 @@ def test_col_like():
     df = pd.DataFrame(columns=["日期", "主力净流入-净额"])
     assert rc.col_like(df, "主力净流入-净额") == "主力净流入-净额"
     assert rc.col_like(df, "不存在") is None
+
+
+def test_json_err_code_extra_field():
+    out = json.loads(rc.json_err_code("NOT_READY", "数据未就绪", expected_at="15:05"))
+    assert out["success"] is False and out["error_code"] == "NOT_READY"
+    assert out["expected_at"] == "15:05"
+
+
+def test_json_not_ready():
+    out = json.loads(rc.json_not_ready("15:05"))
+    assert out["error_code"] == "NOT_READY" and out["data"] is None
+    assert out["expected_at"] == "15:05"
