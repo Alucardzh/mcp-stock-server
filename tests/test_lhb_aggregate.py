@@ -76,3 +76,36 @@ def test_lhb_aggregate_no_data(monkeypatch):
     out = la.lhb_aggregate("2026-11-16")  # 周日
     assert out["stocks"] == {} and out["total_net"] is None
     assert any("无龙虎榜" in n for n in out["notes"])
+
+
+def test_seat_fetch_per_code_called(monkeypatch):
+    # 3 只上榜票 → _seat_rows 每只恰好调用一次（并发池不重不漏）
+    monkeypatch.setattr(
+        la,
+        "_fetch_billboard",
+        lambda day: pd.DataFrame(
+            {
+                "股票代码": ["002384", "601595", "300750"],
+                "股票名称": ["东山精密", "沪电股份", "宁德时代"],
+                "龙虎榜净买额": [5.0e8, -3.0e8, 2.0e8],
+                "龙虎榜买入额": [8.0e8, 1.0e8, 4.0e8],
+                "龙虎榜卖出额": [2.0e8, 4.0e8, 2.0e8],
+                "解读": ["", "", ""],
+                "上榜原因": ["日涨幅偏离", "日跌幅偏离", "日涨幅偏离"],
+            }
+        ),
+    )
+    called: list[str] = []
+
+    def fake_seat_rows(code, d_compact):
+        called.append(code)
+        return [("机构专用", 100.0, None)]
+
+    monkeypatch.setattr(la, "_seat_rows", fake_seat_rows)
+    out = la.lhb_aggregate("2026-11-11")
+    assert sorted(called) == ["002384", "300750", "601595"]  # 每码恰好一次
+    assert out["stocks"].keys() == {"002384", "601595", "300750"}
+    for code in ("002384", "601595", "300750"):
+        s = out["stocks"][code]
+        assert "inst" in s and "seat_n" in s  # 席位字段齐全
+        assert s["inst"] == 100.0 and s["seat_n"] == 1

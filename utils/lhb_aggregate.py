@@ -11,6 +11,7 @@
 金额单位万元（席位口径与现有 seats 工具一致）；net/buy/sell 为榜面口径（元→万元）。
 """
 
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 import logging
 
@@ -84,11 +85,22 @@ def _aggregate_stocks(day) -> tuple[dict, list[str]]:
         if r["reason"] and r["reason"] not in a["reasons"]:
             a["reasons"].append(r["reason"])
     d_compact = day.strftime("%Y%m%d")
+    seat_map: dict[str, list] = {}
+    try:
+        with ThreadPoolExecutor(max_workers=6) as pool:
+            for code, rows in zip(
+                by_code.keys(),
+                pool.map(lambda c: _seat_rows(c, d_compact), by_code.keys()),
+            ):
+                seat_map[code] = rows
+    except Exception as e:  # noqa: BLE001  CACHE 契约：fetch_fn 不得抛
+        logger.warning("seat fetch pool failed: %s", e)
+        seat_map = {c: [] for c in by_code}  # 榜面口径仍有效；三分类降级为 0
     stocks = {}
     for code, a in by_code.items():
         buy, sell = max(a["recs"], key=lambda p: p[0])  # 并集口径：买额最大的记录
         net = (buy - sell) / 1e4  # 元 → 万元
-        rows = _seat_rows(code, d_compact)
+        rows = seat_map.get(code, [])
         seen, inst, foreign, hot, buy_side_n, sell_side_n = set(), 0.0, 0.0, 0.0, 0, 0
         seat_net = 0.0
         for name, buy_wan, sell_wan in rows:
@@ -131,6 +143,18 @@ def lhb_aggregate(date: str, symbols: list[str] = []) -> dict:
     cats/total_net 恒为全榜口径（不随 symbols 过滤缩水）；stocks 才按 symbols 过滤。
     """
     day = parse_day(date)
+    if day is None:
+        return {
+            "date": date,
+            "stocks": {},
+            "cats": {},
+            "total_net": None,
+            "notes": [f"日期格式错误: {date}"],
+            "as_of": "",
+            "cached": False,
+            "stale": False,
+            "source": "eastmoney_datacenter",
+        }
     day_str = str(day)
 
     def _fetch() -> EmResult:
