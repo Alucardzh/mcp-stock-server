@@ -531,3 +531,59 @@ def test_boards_offset_pagination(monkeypatch):
     # limit>200 被钳制为 200（返回全部 3 条），offset<0 钳制为 0
     out3 = json.loads(bq.get_boards(scope="行业", limit=300, offset=-5))
     assert len(out3["data"]["boards"]) == 3 and out3["data"]["offset"] == 0
+
+
+def test_boards_sort_code_name_and_paging_meta(monkeypatch):
+    """G1：sort=code/name 字典序（升序）；limit 钳 600；has_more/next_offset。"""
+    rows = [
+        _row("BK0002", "乙板块", 1e8),
+        _row("BK0001", "甲板块", 2e8),
+        _row("BK0003", "丙板块", 3e8),
+    ]
+    _mock_upstream(
+        monkeypatch,
+        industry=EmResult(ok=True, data=_clist_payload(rows), as_of="t"),
+    )
+    monkeypatch.setattr(bq, "zt_industry_counts", lambda date="": None)
+    out = json.loads(bq.get_boards(scope="行业", sort="code", limit=2, offset=1))
+    d = out["data"]
+    assert [b["board_code"] for b in d["boards"]] == ["BK0002", "BK0003"]  # 升序+分页
+    assert d["has_more"] is False and d["next_offset"] is None and d["total"] == 3
+    out2 = json.loads(bq.get_boards(scope="行业", sort="code", limit=2))
+    assert out2["data"]["has_more"] is True and out2["data"]["next_offset"] == 2
+    out3 = json.loads(bq.get_boards(scope="行业", sort="name", limit=1))
+    assert out3["data"]["boards"][0]["board_name"] == "丙板块"  # name 字典序
+    out4 = json.loads(bq.get_boards(scope="行业", limit=1000))
+    assert len(out4["data"]["boards"]) == 3  # limit 钳 600 不报错
+
+
+def test_board_quote_prefix_unique_hit(monkeypatch):
+    """G2：截断名前缀唯一命中（汽车零部→汽车零部件）。"""
+    row = _row("BK0481", "汽车零部件", 1e8)
+    _mock_upstream(
+        monkeypatch,
+        industry=EmResult(ok=True, data=_clist_payload([row]), as_of="t"),
+        concept=EmResult(ok=True, data=_clist_payload([]), as_of="t"),
+        ulist=EmResult(ok=True, data={"diff": []}, as_of="t"),
+        stock_get=EmResult(ok=True, data={"f46": 42192.07, "f60": 42144.03}, as_of="t"),
+    )
+    monkeypatch.setattr(bq, "zt_industry_counts", lambda date="": None)
+    out = json.loads(bq.get_board_quote(board_name="汽车零部"))
+    d = out["data"]
+    assert d["board_code"] == "BK0481" and d["matched_by"] == "prefix"
+    assert d["board_name"] == "汽车零部件"
+
+
+def test_board_quote_prefix_ambiguous(monkeypatch):
+    """G2：前缀多命中 → status=ambiguous + 候选列表（不误报 BOARD_NOT_FOUND）。"""
+    rows = [_row("BK0481", "汽车零部件", 1e8), _row("BK0482", "汽车整车", 1e8)]
+    _mock_upstream(
+        monkeypatch,
+        industry=EmResult(ok=True, data=_clist_payload(rows), as_of="t"),
+        concept=EmResult(ok=True, data=_clist_payload([]), as_of="t"),
+    )
+    out = json.loads(bq.get_board_quote(board_name="汽车"))
+    assert out["success"] is True and out["data"] is None
+    assert out["status"] == "ambiguous"
+    assert {c["board_name"] for c in out["candidates"]} == {"汽车零部件", "汽车整车"}
+    assert all(c["scope"] == "行业" for c in out["candidates"])

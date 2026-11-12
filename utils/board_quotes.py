@@ -16,6 +16,7 @@ limit_up（板块内涨停家数）来自涨停池所属行业分桶（review_ma
 4 字截断名前缀匹配），算不出时省略字段。
 """
 
+import json
 import logging
 
 from .push2_client import CACHE, EmResult, em_push2_get, now_iso
@@ -260,17 +261,54 @@ def _scale_block(openq: dict) -> dict | None:
     }
 
 
-def _lookup(snaps: list[EmResult], code: str, name: str):
-    """行业/概念快照里找板块行，返回 (row, scope)；未命中 (None, None)。"""
+def _lookup2(loaded: list, code: str, name: str):
+    """精确→前缀两段查找。返回 (row, scope, matched_by, candidates)。
+
+    candidates 非空 = 前缀多命中（row=None，调用方应返回 ambiguous 信封）。
+    前缀方向：完整板块名 startswith(查询名)——客户端规则存东财 4 字截断名。
+    """
     if code and not code.startswith("BK"):
         code = f"BK{code}"
-    for s in snaps:
-        if not s.ok or not s.data:
-            continue
+    ok_snaps = [s for s in loaded if s.ok and s.data]
+    for s in ok_snaps:
         row = s.data["by_code"].get(code) if code else s.data["by_name"].get(name)
         if row is not None:
-            return row, s.data["scope"]
-    return None, None
+            return row, s.data["scope"], "exact", None
+    if name:
+        hits = [
+            (b, s.data["scope"])
+            for s in ok_snaps
+            for b in s.data["boards"]
+            if str(b["board_name"]).startswith(name)
+        ]
+        if len(hits) == 1:
+            return hits[0][0], hits[0][1], "prefix", None
+        if len(hits) > 1:
+            cands = [
+                {
+                    "board_code": b["board_code"],
+                    "board_name": b["board_name"],
+                    "scope": sc,
+                }
+                for b, sc in hits
+            ]
+            return None, None, "prefix", cands
+    return None, None, "", None
+
+
+def _json_ambiguous(name: str, candidates: list) -> str:
+    """前缀多命中：缺选择，不是错误——让调用方从候选里二次选择。"""
+    return json.dumps(
+        {
+            "success": True,
+            "data": None,
+            "status": "ambiguous",
+            "query": name,
+            "candidates": candidates,
+        },
+        ensure_ascii=False,
+        indent=2,
+    )
 
 
 @RateLimiter(max_calls=20, time_window=60)
@@ -291,7 +329,9 @@ def get_board_quote(board_code: str = "", board_name: str = "") -> str:
         if not code and not name:
             return _boards_digest(snaps)
 
-        row, scope = _lookup(snaps, code, name)
+        row, scope, matched_by, candidates = _lookup2(snaps, code, name)
+        if candidates:
+            return _json_ambiguous(name, candidates)
         if row is None:
             if any(not s.ok for s in snaps):
                 # 单 scope 快照失败：板块可能在缺失的那组里，缺数据≠不存在
@@ -328,6 +368,8 @@ def get_board_quote(board_code: str = "", board_name: str = "") -> str:
                 "source": _SOURCE,
             }
         )
+        if matched_by == "prefix":
+            out["matched_by"] = "prefix"
         if notes:
             out["notes"] = notes
         if open_ is None and not notes:
@@ -384,8 +426,9 @@ def get_boards(
 
     Args:
         scope: 行业（默认）/ 概念
-        sort: main_net（默认）/ chg / open_pct
-        limit: 返回条数 ≤200，默认 20
+        sort: main_net（默认）/ chg / open_pct / code / name
+            （code/name 为字典序升序，便于全量翻页）
+        limit: 返回条数 ≤600，默认 20
         with_open: 是否附带开盘涨跌幅（默认 true；false 省上游请求）。
             open_pct 用 clist f17/f18 比值（非标刻度，比值不受影响）；原始
             open/prev_close 仅在真实渠道（stock/get）有值时输出，否则 null。
@@ -394,9 +437,11 @@ def get_boards(
     try:
         if scope not in _SCOPE_FS:
             return json_err(f"scope 仅支持 行业/概念，当前: {scope}")
-        if sort not in ("main_net", "chg", "open_pct"):
-            return json_err(f"sort 仅支持 main_net/chg/open_pct，当前: {sort}")
-        limit = max(1, min(int(limit), 200))
+        if sort not in ("main_net", "chg", "open_pct", "code", "name"):
+            return json_err(
+                f"sort 仅支持 main_net/chg/open_pct/code/name，当前: {sort}"
+            )
+        limit = max(1, min(int(limit), 600))
         offset = max(0, int(offset))
 
         snap = fetch_board_list(scope)
@@ -451,11 +496,16 @@ def get_boards(
             "main_net": lambda b: (b["main_net_yi"] is not None, b["main_net_yi"] or 0),
             "chg": lambda b: (b["current_pct"] is not None, b["current_pct"] or 0),
             "open_pct": lambda b: (b["open_pct"] is not None, b["open_pct"] or 0),
+            "code": lambda b: b[
+                "board_code"
+            ],  # 字典序（升序，供客户端稳定翻页全量拉取）
+            "name": lambda b: b["board_name"],
         }[sort]
-        boards.sort(key=sort_key, reverse=True)
+        boards.sort(key=sort_key, reverse=sort not in ("code", "name"))
 
         counts = zt_industry_counts()
         emit = [_emit_row(b, counts) for b in boards[offset : offset + limit]]
+        has_more = offset + limit < snap.data["total"]
         return json_ok(
             {
                 "scope": scope,
@@ -463,6 +513,8 @@ def get_boards(
                 "total": snap.data["total"],
                 "offset": offset,
                 "limit": limit,
+                "has_more": has_more,
+                "next_offset": offset + limit if has_more else None,
                 "boards": emit,
                 "notes": notes,
                 "as_of": snap.as_of,

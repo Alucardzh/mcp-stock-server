@@ -11,6 +11,8 @@ def get_board_quote_tool(board_code: str = "", board_name: str = "") -> str:
     Args:
         board_code: 东财板块代码，如 BK0459（与 board_name 二选一）
         board_name: 东财板块名原文，如 元件 / 游戏Ⅱ；都不给则返回全部板块精简表
+            （支持 4 字截断名前缀匹配：唯一命中返回并标 matched_by:"prefix"，
+            多命中返回 status:"ambiguous"+candidates）
     """
     return get_board_quote(board_code, board_name)
 
@@ -27,8 +29,8 @@ def get_boards_tool(
 
     Args:
         scope: 行业（默认）/ 概念
-        sort: main_net（默认）/ chg / open_pct
-        limit: 返回条数 ≤200，默认 20
+        sort: main_net（默认）/ chg / open_pct / code / name（code/name 为字典序升序，便于全量翻页）
+        limit: 返回条数 ≤600，默认 20
         with_open: 附带开盘涨跌幅（默认 true）
         offset: 按 sort 排序后跳过前 N 条（分页取排行尾部；越界返回空列表）
     """
