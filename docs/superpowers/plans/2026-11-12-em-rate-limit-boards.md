@@ -577,19 +577,28 @@ def _pool_cached(pool: str, day: date_type):
     """三池 DataFrame 缓存（single-flight；拉取失败不写缓存，stale 降级）。
 
     akshare push2ex 直连不经 push2_client pacing（不同限流桶），仅复用缓存层。
+    空数据不缓存；「拉到但为空」的 DataFrame 原样透传（不写缓存），
+    保持 breadth 的 zhaban/limit_down=0 语义（否则 test_breadth_section_history 挂）；
+    「拉取失败」返回 None。
     返回 (df|None, as_of, cached, stale)。
     """
+    fetched_empty: list[pd.DataFrame] = []
 
     def _fetch() -> EmResult:
         df = _pool_rows(pool, day)
         if df is None or df.empty:
-            # 空数据不缓存：可能是非交易日，也可能是拉取失败（_pool_rows 内部已吞异常）
+            if df is not None:
+                fetched_empty.append(df)
             return EmResult(ok=False, reason="upstream_error")
         return EmResult(ok=True, data=df, as_of=now_iso())
 
     res = PUSH2_CACHE.get(f"pool:{pool}:{day}", _pool_ttl(day), _fetch)
-    df = res.data if res.ok else None
-    return df, (res.as_of if res.ok else ""), res.cached, res.stale
+    if res.ok:
+        return res.data, res.as_of, res.cached, res.stale
+    if fetched_empty:
+        # 本轮拉取成功但为空：ok=False 未写缓存，空 df 直接透传（每次现拉）
+        return fetched_empty[-1], "", False, False
+    return None, "", False, False
 ```
 
 `_pool_with_fallback` 整体替换为：
