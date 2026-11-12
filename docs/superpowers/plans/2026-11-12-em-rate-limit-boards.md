@@ -134,8 +134,8 @@ def test_pacing_enforced(monkeypatch):
     monkeypatch.setattr(pc, "_min_interval", lambda: 1.5)
     monkeypatch.setattr(pc.time, "sleep", lambda s: sleeps.append(s))
     c = {"n": 0}
-    _mock_get(monkeypatch, [{"data": {"a": 1}}], c)
-    assert pc.em_push2_get("/api/x", {}).ok  # 双 host，第二个前 _pace 等待
+    _mock_get(monkeypatch, [{"data": None}, {"data": {"a": 1}}], c)
+    assert pc.em_push2_get("/api/x", {}).ok  # 首 host 失败，第二个前 _pace 等待
     assert len(sleeps) == 1 and sleeps[0] >= 1.4
 
 
