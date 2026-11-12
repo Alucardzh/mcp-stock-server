@@ -4,6 +4,7 @@ from datetime import datetime
 
 from mcp_app import mcp
 from utils.kline_metrics import batch_klines
+from utils.lhb_aggregate import lhb_aggregate
 from utils.review_common import json_err_code, json_ok, parse_day
 
 
@@ -33,3 +34,16 @@ def get_klines_batch_tool(symbols: list[str], bars: int = 130, date: str = "") -
             **out,
         }
     )
+
+
+@mcp.tool()
+def get_lhb_batch_tool(date: str, symbols: list[str] = []) -> str:
+    """龙虎榜批量聚合（万元）：榜净并集口径 + 席位指纹去重三分类 + diff 参考值
+
+    Args:
+        date: YYYY-MM-DD（当日席位约18:00后定稿）
+        symbols: 6位代码列表；为空则返回全部上榜票
+    """
+    if parse_day(date) is None:
+        return json_err_code("INVALID_ARG", f"日期格式错误: {date}")
+    return json_ok(lhb_aggregate(date, symbols))
