@@ -343,3 +343,79 @@ def test_boards_open_gap_too_large_skips_batch(monkeypatch):
         abs(by_code["BK7000"]["open_pct"] - (50.0 - 49.4854) / 49.4854 * 100) < 0.01
     )  # clist 比值仍在
     assert by_code["BK8000"]["open_pct"] is None and by_code["BK8000"]["open"] is None
+
+
+def test_boards_open_batch_targets_missing_only(monkeypatch):
+    """≤20 缺口：批量开盘请求只打缺失板块（不全量；覆盖板免 ulist/stock/get，
+    且不会被 stock/get 的 20 只截断挤掉真正缺口的板块）。"""
+    covered = [
+        dict(_ROW_YUANJIAN, f12=f"BK6{i:02d}", f14=f"覆盖{i}", f17=50.0)
+        for i in range(2)
+    ]
+    missing_rows = [
+        dict(_ROW_YUANJIAN, f12=f"BK5{i:02d}", f14=f"缺失{i}") for i in range(3)
+    ]
+    calls = {"paths": [], "secids": []}
+
+    def fake(path, params):
+        calls["paths"].append(path)
+        if path == "/api/qt/clist/get":
+            if "t:2" in params.get("fs", ""):
+                return EmResult(
+                    ok=True, data=_clist_payload(covered + missing_rows), as_of="t"
+                )
+            return EmResult(ok=True, data=_clist_payload([]), as_of="t")
+        if path == "/api/qt/ulist.np/get":
+            return EmResult(ok=True, data={"diff": []}, as_of="t")  # 板块形态：'-'
+        if path == "/api/qt/stock/get":
+            calls["secids"].append(params.get("secid"))
+            return EmResult(ok=True, data={"f46": 7.7, "f60": 7.0}, as_of="t")
+        raise AssertionError(f"unexpected path {path}")
+
+    monkeypatch.setattr(bq, "em_push2_get", fake)
+    monkeypatch.setattr(bq, "zt_industry_counts", lambda date="": None)
+    out = json.loads(bq.get_boards(scope="行业", with_open=True, limit=50))
+    d = out["data"]
+    assert sorted(calls["secids"]) == ["90.BK500", "90.BK501", "90.BK502"]  # 仅缺失板块
+    by_code = {b["board_code"]: b for b in d["boards"]}
+    assert by_code["BK500"]["open"] == 7.7 and by_code["BK500"]["prev_close"] == 7.0
+    assert abs(by_code["BK500"]["open_pct"] - (7.7 - 7.0) / 7.0 * 100) < 0.01
+    assert by_code["BK600"]["open"] is None  # 覆盖板原始值仍 null（clist 比值口径）
+    assert abs(by_code["BK600"]["open_pct"] - (50.0 - 49.4854) / 49.4854 * 100) < 0.01
+    assert d["notes"] == []
+
+
+def test_boards_open_fetch_failure_note_clist_ratio(monkeypatch):
+    """≤20 缺口但批量开盘获取失败：note 口径对齐（open_pct 为 clist 比值，
+    不再误称"为空"）；覆盖板 open_pct 仍在，缺板为 None。"""
+    rows = [
+        dict(_ROW_YUANJIAN, f12="BK601", f14="覆盖一", f17=50.0),
+        dict(_ROW_YUANJIAN, f12="BK501", f14="缺失一"),
+    ]
+    _mock_upstream(
+        monkeypatch,
+        industry=EmResult(ok=True, data=_clist_payload(rows), as_of="t"),
+        ulist=EmResult(ok=False, reason="rate_limited"),
+    )
+    monkeypatch.setattr(bq, "zt_industry_counts", lambda date="": None)
+    out = json.loads(bq.get_boards(scope="行业", with_open=True))
+    d = out["data"]
+    assert d["notes"] == [
+        "开盘涨跌幅获取失败(rate_limited)，open_pct 为 clist 比值口径"
+    ]
+    by_code = {b["board_code"]: b for b in d["boards"]}
+    assert by_code["BK501"]["open_pct"] is None and by_code["BK501"]["open"] is None
+    assert abs(by_code["BK601"]["open_pct"] - (50.0 - 49.4854) / 49.4854 * 100) < 0.01
+
+
+def test_board_list_exact_page_count_stops(monkeypatch):
+    """total=200 恰为 2 整页：第 2 页满页后按 upstream_total 停止，
+    不请求必空的第 3 页（旧行为：空页→rate_limited→整个快照失败）。"""
+    calls = _paginated_upstream(
+        monkeypatch, [_concept_rows(1, 100), _concept_rows(2, 100)]
+    )
+    monkeypatch.setattr(bq, "zt_industry_counts", lambda date="": None)
+    out = json.loads(bq.get_boards(scope="概念", with_open=False, limit=5))
+    assert out["success"], out
+    assert out["data"]["total"] == 200
+    assert calls["pns"] == [1, 2]  # 无第 3 次请求

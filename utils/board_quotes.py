@@ -114,6 +114,8 @@ def fetch_board_list(scope: str) -> EmResult:
             rows.extend(diff)
             if len(diff) < _CLIST_PAGE_SIZE:
                 break
+            if upstream_total and len(rows) >= upstream_total:
+                break  # 恰好整页凑满（total%100==0）：下一页必为空页，免打
         boards = [
             _normalize_board_row(scope, r)
             for r in rows
@@ -376,11 +378,15 @@ def get_boards(
             if not missing:
                 pass  # clist f17/f18 已齐：仅用其比值，免（对板块无效的）ulist 请求
             elif len(missing) <= _OPEN_BATCH_MAX_MISSING:
-                open_res = fetch_board_open([b["board_code"] for b in boards])
+                # 只打缺失板块：全量会让 stock/get 兜底的 20 只截断挤掉真正
+                # 缺口的部分，且白烧 ulist 分块探测。
+                open_res = fetch_board_open([b["board_code"] for b in missing])
                 if open_res.ok:
                     opens = open_res.data or {}
                 else:
-                    notes.append(f"开盘涨跌幅不可用({open_res.reason})，open_pct 为空")
+                    notes.append(
+                        f"开盘涨跌幅获取失败({open_res.reason})，open_pct 为 clist 比值口径"
+                    )
             else:
                 # 缺口过大（如盘前 f17 整批为 '-'）：逐板块 stock/get 的 pacing 代价
                 # 不可接受（概念 500+ 只 ≈ 十几分钟），跳过批量获取，
