@@ -14,7 +14,9 @@ SERVER_INSTRUCTIONS = """A股行情与复盘数据服务器（东财数据源，
 代码与名称互查：get_stock_symbol_by_name_tool。
 
 【复盘】
-- get_daily_review_tool(date)：一键复盘，七模块并行聚合（指数/涨跌结构/资金/国家队ETF/期指基差+席位/期权PCR/两融）
+- get_daily_review_tool(date)：一键复盘，七模块并行聚合（指数/涨跌结构/资金/国家队ETF/期指基差+席位/期权PCR/两融）；已废弃(deprecated)，晚班复盘请用 fupan_v1_tool
+- fupan_v1_tool(date, symbols, options)：晚班复盘一站式（v1 冻结）：指数/宽度/资金流/三池全量/行业桶/链强度(chain_buckets)/板块/个股日K指标(不复权)/龙虎榜；段级 unavailable 降级，缺数据≠零值
+- get_klines_batch_tool(symbols, bars, date)：日K指标批量；get_lhb_batch_tool(date, symbols)：龙虎榜聚合（万元，指纹去重三分类）
 - get_zt_pool_tool(pool, date, full)：涨停生态五池（涨停/炸板/跌停/强势/昨涨停），支持历史日期；涨停/炸板池含首次封板时间/最后封板时间（HHMMSS），"最早上板"按首次封板时间排序；full=true 返回全量池（链强度/炸板率/晋级率须全量，默认截断60条）
 - get_market_breadth_tool(date)：涨跌家数（仅当日）+ 涨跌停/炸板家数 + 连板梯队
 

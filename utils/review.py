@@ -89,6 +89,7 @@ def get_daily_review(date: str = "") -> str:
         data = {
             "date": key,
             "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "deprecated": "see fupan_v1_tool",
         }
         notes, errors = [], {}
         for name, section, mod_notes, err in results:

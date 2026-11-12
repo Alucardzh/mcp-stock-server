@@ -29,6 +29,7 @@ from .global_linkage import get_global_linkage_review
 from .intraday import get_stock_auction, get_stock_intraday
 from .boards import get_stock_boards
 from .board_quotes import get_board_quote, get_boards
+from .fupan import fupan_v1
 from .lhb import get_lhb, get_lhb_seats
 
 __all__ = [
@@ -61,4 +62,5 @@ __all__ = [
     "get_boards",
     "get_lhb",
     "get_lhb_seats",
+    "fupan_v1",
 ]
