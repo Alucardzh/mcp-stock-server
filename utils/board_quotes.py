@@ -34,6 +34,7 @@ BOARD_OPEN_TTL = 60.0  # 开盘价缓存（秒）
 _ULIST_CHUNK = 100  # GET URL 长度安全分块
 _CLIST_PAGE_SIZE = 100  # clist 单页行数上限（实测 pz>100 也只回 100）
 _CLIST_MAX_PAGES = 8  # 翻页安全上限（概念 ~496 板块 → 5 页）
+_OPEN_BATCH_MAX_MISSING = 20  # R2 批量开盘请求的缺口上限（超过则跳过，见 get_boards）
 
 ulist_ok: bool | None = (
     None  # None=未探测；False=ulist 不支持板块 secid，已退化 stock/get
@@ -157,9 +158,14 @@ def _fetch_open_ulist(codes: list[str]) -> EmResult:
 
 
 def _fetch_open_stock_get(codes: list[str]) -> EmResult:
-    """逐板块 stock/get 兜底（fields 全集，见模块 docstring）。"""
+    """逐板块 stock/get 兜底（fields 全集，见模块 docstring）。
+
+    保底截断：最多取前 20 个（codes 已排序）——逐请求 pacing 1.5s，大量代码
+    会拖垮延迟；真正的规模防护在调用方（get_boards 缺口>20 直接跳过批量获取，
+    R1 只查单板块）。正常路径不会触达该截断。
+    """
     merged, as_of = {}, ""
-    for c in codes:
+    for c in codes[:_OPEN_BATCH_MAX_MISSING]:
         res = em_push2_get(
             "/api/qt/stock/get",
             {"fltt": 2, "invt": 2, "fields": _STOCK_GET_FIELDS, "secid": f"90.{c}"},
@@ -364,16 +370,25 @@ def get_boards(
 
         if with_open:
             opens = {}
-            if all(
-                b["_open"] is not None and b["_prev_close"] is not None for b in boards
-            ):
+            missing = [
+                b for b in boards if b["_open"] is None or b["_prev_close"] is None
+            ]
+            if not missing:
                 pass  # clist f17/f18 已齐：仅用其比值，免（对板块无效的）ulist 请求
-            else:
+            elif len(missing) <= _OPEN_BATCH_MAX_MISSING:
                 open_res = fetch_board_open([b["board_code"] for b in boards])
                 if open_res.ok:
                     opens = open_res.data or {}
                 else:
                     notes.append(f"开盘涨跌幅不可用({open_res.reason})，open_pct 为空")
+            else:
+                # 缺口过大（如盘前 f17 整批为 '-'）：逐板块 stock/get 的 pacing 代价
+                # 不可接受（概念 500+ 只 ≈ 十几分钟），跳过批量获取，
+                # open_pct 一律 clist 比值口径（缺者 None）。
+                notes.append(
+                    f"开盘价缺口过大(缺{len(missing)}/总{len(boards)})，"
+                    "跳过批量获取，open_pct 为 clist 比值口径"
+                )
             for b in boards:
                 o = opens.get(b["board_code"]) or {}
                 # 原始 open/prev_close 仅来自真实渠道（stock/get/ulist）；

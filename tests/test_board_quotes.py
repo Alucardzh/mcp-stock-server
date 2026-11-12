@@ -313,3 +313,33 @@ def test_board_quote_beyond_first_page_found(monkeypatch):
     assert d["board_code"] == "BK92049" and d["scope"] == "概念"
     assert d["open"] == 10.5 and d["prev_close"] == 10.0  # 来自 stock/get
     assert calls["pns"] == [1, 2] and "/api/qt/stock/get" in calls["paths"]
+
+
+def test_boards_open_gap_too_large_skips_batch(monkeypatch):
+    """盘前形态：>20 板块缺 f17/f18 → 不发起批量开盘请求（免逐板块 stock/get
+    风暴），open_pct 走 clist 比值（缺者 None），open/prev_close 为 null，note 说明。"""
+    rows = [
+        dict(_ROW_YUANJIAN, f12=f"BK7{i:03d}", f14=f"行业{i:03d}", f17=50.0)
+        for i in range(3)
+    ]
+    rows += [
+        dict(_ROW_YUANJIAN, f12=f"BK8{i:03d}", f14=f"缺失{i:03d}") for i in range(22)
+    ]
+    calls = _mock_upstream(
+        monkeypatch,
+        industry=EmResult(ok=True, data=_clist_payload(rows), as_of="t"),
+    )
+    monkeypatch.setattr(bq, "zt_industry_counts", lambda date="": None)
+    out = json.loads(bq.get_boards(scope="行业", with_open=True, limit=50))
+    assert out["success"]
+    d = out["data"]
+    assert all(p == "/api/qt/clist/get" for p in calls["paths"])  # 零开盘上游请求
+    assert d["notes"] == [
+        "开盘价缺口过大(缺22/总25)，跳过批量获取，open_pct 为 clist 比值口径"
+    ]
+    by_code = {b["board_code"]: b for b in d["boards"]}
+    assert by_code["BK7000"]["open"] is None and by_code["BK7000"]["prev_close"] is None
+    assert (
+        abs(by_code["BK7000"]["open_pct"] - (50.0 - 49.4854) / 49.4854 * 100) < 0.01
+    )  # clist 比值仍在
+    assert by_code["BK8000"]["open_pct"] is None and by_code["BK8000"]["open"] is None
