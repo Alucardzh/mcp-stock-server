@@ -4,6 +4,7 @@
 """
 
 from . import (  # noqa: F401
+    board_quotes,
     derivatives,
     funds,
     global_markets,
