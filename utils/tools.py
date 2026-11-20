@@ -18,6 +18,7 @@ import functools
 import json
 import logging
 import time
+from datetime import datetime, timedelta
 from http.client import RemoteDisconnected
 from os import getenv
 from typing import Any
@@ -33,17 +34,17 @@ akshare_proxy_patch.install_patch(
     retry=30,
     # 封控的域名列表，可自行调整
     hook_domains=[
-      "fund.eastmoney.com",
-      "push2.eastmoney.com",
-      "push2his.eastmoney.com",
-      "emweb.securities.eastmoney.com",
-      "searchapi.eastmoney.com/api/suggest/get",
-      "datacenter-web.eastmoney.com",
+        "fund.eastmoney.com",
+        "push2.eastmoney.com",
+        "push2his.eastmoney.com",
+        "emweb.securities.eastmoney.com",
+        "searchapi.eastmoney.com/api/suggest/get",
+        "datacenter-web.eastmoney.com",
     ],
-    fast=True
+    fast=True,
 )
 from akshare import (
-    stock_zh_index_spot_em,
+    index_zh_a_hist,
 )
 
 from .ef import ef_spot_all, ef_stock_base_info, ef_stock_hist
@@ -536,66 +537,68 @@ def calculate_support_resistance_func(
         )
 
 
+_INDEX_NAMES = {
+    "000001": "上证指数",
+    "399001": "深证成指",
+    "399006": "创业板指",
+    "000688": "科创50",
+    "899050": "北证50",
+}
+
+
 @RateLimiter(max_calls=30, time_window=60)
 @with_retry(max_retries=3, delay=1.0, backoff=2.0)
 def get_market_index(index_code: str = "000001") -> str:
-    """Get major Chinese market indices data.
+    """Get Chinese market index data by index code.
 
     Args:
-        index_code: Index code (default: 000001 for Shanghai Composite)
+        index_code: 指数代码，6位数字（默认 000001 上证指数；如 399001 深证成指、
+            399006 创业板指、000688 科创50、899050 北证50）——任意指数代码均可
     """
     try:
-        logger.info("Fetching market index data for %s", index_code)
-        # Fetch index data from Akshare
-        data = stock_zh_index_spot_em()
-        if data is None or data.empty:
+        code = (index_code or "").strip()
+        if not (code.isdigit() and len(code) == 6):
             return json.dumps(
                 {
                     "success": False,
-                    "error": f"No index data found for code {index_code}",
+                    "error": f"指数代码格式非法: {index_code!r}（应为6位数字）",
                 },
                 ensure_ascii=False,
                 indent=2,
             )
-        # Find the specific index
-        index_data = data[data["代码"] == index_code]
-        if index_data.empty:
-            return json.dumps(
-                {
-                    "success": False,
-                    "error": f"Index {index_code} not found in index data",
-                },
-                ensure_ascii=False,
-                indent=2,
-            )
-        # Format response
-        if len(index_data) > 0:
-            index = index_data.iloc[0]
-            result = {
-                "success": True,
-                "data": {
-                    "code": index_code,
-                    "name": index.get("名称", "Unknown"),
-                    "current_point": float(index["最新价"])
-                    if "最新价" in index
-                    else None,
-                    "change": float(index["涨跌额"]) if "涨跌额" in index else None,
-                    "change_percent": float(index["涨跌幅"])
-                    if "涨跌幅" in index
-                    else None,
-                    "volume": int(index["成交量"]) if "成交量" in index else None,
-                    "amount": float(index["成交额"]) if "成交额" in index else None,
-                    "update_time": pd.Timestamp.now().isoformat(),
-                    "source": "akshare_index",
-                },
-            }
-            return json.dumps(result, ensure_ascii=False, indent=2)
-        return json.dumps(
-            {"success": False, "error": f"No data returned for index {index_code}"},
-            ensure_ascii=False,
-            indent=2,
+        end = datetime.now().strftime("%Y%m%d")
+        start = (datetime.now() - timedelta(days=10)).strftime("%Y%m%d")
+        # 指数快照接口(stock_zh_index_spot_em)不含深证成指/北证50等标的（需求v3 N4），
+        # 改用指数日K通道（盘中含当日实时行），按代码精确取数
+        df = index_zh_a_hist(
+            symbol=code, period="daily", start_date=start, end_date=end
         )
-
+        if df is None or df.empty:
+            return json.dumps(
+                {"success": False, "error": f"Index {code} 无数据（可能为非指数代码）"},
+                ensure_ascii=False,
+                indent=2,
+            )
+        r = df.iloc[-1]
+        result = {
+            "success": True,
+            "data": {
+                "code": code,
+                "name": _INDEX_NAMES.get(code),
+                "current_point": _round2(r["收盘"]),
+                "change": _round2(r["涨跌额"]),
+                "change_percent": _round2(r["涨跌幅"]),
+                "volume": int(_num(r["成交量"]) or 0),
+                "amount": _num(r["成交额"]),
+                "open": _round2(r["开盘"]),
+                "high": _round2(r["最高"]),
+                "low": _round2(r["最低"]),
+                "prev_close": _round2(df["收盘"].iloc[-2]) if len(df) > 1 else None,
+                "update_time": str(r["日期"]),
+                "source": "akshare_index_hist",
+            },
+        }
+        return json.dumps(result, ensure_ascii=False, indent=2)
     except Exception as e:
         logger.error("Error fetching index data: %s", e)
         return json.dumps(

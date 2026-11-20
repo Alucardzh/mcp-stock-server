@@ -96,9 +96,15 @@ def _get_spot() -> pd.DataFrame:
 
 
 def indices_section(day: date_type) -> dict:
-    """① 指数概览：五大指数收盘/涨跌幅/成交额（亿元）"""
+    """① 指数概览：五大指数开盘/最高/最低/收盘/昨收/涨跌幅/成交额（亿元）
+
+    prev_close 取序列前一根收盘（回看窗口多取 10 个自然日保证有前一根）；
+    open/high/low 缺值（上游偶发 '-'）时该键为 None，不用 0 冒充。
+    """
     notes, items = [], []
-    start = (day - timedelta(days=14)).strftime("%Y%m%d")
+    start = (day - timedelta(days=24)).strftime(
+        "%Y%m%d"
+    )  # 多回看10天：保证有前一根收盘
     end = day.strftime("%Y%m%d")
     for code, name in REVIEW_INDEXES:
         try:
@@ -109,6 +115,7 @@ def indices_section(day: date_type) -> dict:
                 notes.append(f"{name}({code}) 在 {day} 无数据(可能非交易日)")
                 continue
             r = df.iloc[-1]
+            prev_close = safe_num(df["收盘"].iloc[-2], 2) if len(df) > 1 else None
             items.append(
                 {
                     "code": code,
@@ -116,6 +123,10 @@ def indices_section(day: date_type) -> dict:
                     "close": safe_num(r["收盘"], 2),
                     "chg_pct": safe_num(r["涨跌幅"], 2),
                     "amount_yi": safe_num(float(r["成交额"]) / 1e8, 0),
+                    "open": safe_num(r["开盘"], 2),
+                    "high": safe_num(r["最高"], 2),
+                    "low": safe_num(r["最低"], 2),
+                    "prev_close": prev_close,
                 }
             )
         except (TypeError, ValueError) as e:

@@ -32,3 +32,14 @@ def test_fupan_tool_registered():
 
     tools = asyncio.run(mcp.get_tools())
     assert "fupan_v1_tool" in set(tools)
+
+
+def test_date_param_descriptions_carry_format():
+    """需求v3 N1：date 参数 schema description 写明 YYYY-MM-DD（不试错可知）。"""
+    from mcp_app import mcp
+    import mcp_tools  # noqa: F401
+
+    tools = asyncio.run(mcp.get_tools())
+    for name in ("fupan_v1_tool", "get_daily_review_tool"):
+        desc = tools[name].parameters["properties"]["date"].get("description", "")
+        assert "YYYY-MM-DD" in desc, f"{name}: {desc!r}"

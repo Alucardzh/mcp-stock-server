@@ -205,3 +205,11 @@ def test_fupan_v1_invalid_kline_bars(monkeypatch, bars):
     monkeypatch.setattr(fp, "_fupan_v1_fetch", boom)
     out = json.loads(fp.fupan_v1("2026-11-11", options={"kline_bars": bars}))
     assert out["success"] is False and out["error_code"] == "INVALID_ARG"
+
+
+def test_fupan_v1_as_of_is_request_day(monkeypatch):
+    """需求v3 N2：顶层 as_of = 被请求的复盘日（数据本身时点），非组装时刻。"""
+    _mock_sections(monkeypatch, zt_n=3, zb_n=1)
+    out = json.loads(fp.fupan_v1("2026-11-17"))
+    assert out["success"] and out["data"]["as_of"] == "2026-11-17"
+    assert out["data"]["stale"] is False

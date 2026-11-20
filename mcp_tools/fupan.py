@@ -1,6 +1,9 @@
 """复盘一站式工具：fupan_v1 及其零件（klines 批量等）。"""
 
 from datetime import datetime
+from typing import Annotated
+
+from pydantic import Field
 
 from mcp_app import mcp
 from utils.kline_metrics import batch_klines
@@ -60,11 +63,20 @@ def get_lhb_batch_tool(date: str, symbols: list[str] = []) -> str:
 
 
 @mcp.tool()
-def fupan_v1_tool(date: str, symbols: list[str] = [], options: dict = {}) -> str:
+def fupan_v1_tool(
+    date: Annotated[
+        str,
+        Field(
+            description="复盘日，格式 YYYY-MM-DD（收盘口径；非交易日报 NOT_TRADE_DAY）"
+        ),
+    ],
+    symbols: list[str] = [],
+    options: dict = {},
+) -> str:
     """fupan_v1：晚班复盘一站式（v1 冻结；指数/宽度/资金流/三池全量/行业桶/链强度/板块/个股指标/龙虎榜）
 
     Args:
-        date: 复盘日 YYYY-MM-DD（收盘口径；非交易日 NOT_TRADE_DAY；当日<15:02 NOT_READY）
+        date: 复盘日，格式 YYYY-MM-DD（收盘口径；非交易日 NOT_TRADE_DAY；当日<15:02 NOT_READY）
         symbols: 需要个股指标(klines)的代码；缺省=当日涨停池全量∪传入
         options: with_pools/boards/klines/lhb/breadth/fund_flow/derivatives(默认关)，
                  chain_buckets={"电子链":["半导体","元件",...]}，kline_bars=130

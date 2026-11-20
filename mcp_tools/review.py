@@ -1,5 +1,9 @@
 """复盘类工具：一键复盘/涨跌结构/涨停生态/指数。"""
 
+from typing import Annotated
+
+from pydantic import Field
+
 from mcp_app import format_symbol, mcp
 from utils import (
     get_daily_review,
@@ -20,7 +24,9 @@ def get_market_index_tool(index_code: str = "000001") -> str:
 
 
 @mcp.tool()
-def get_daily_review_tool(date: str = "") -> str:
+def get_daily_review_tool(
+    date: Annotated[str, Field(description="查询日期，格式 YYYY-MM-DD；空=今天")] = "",
+) -> str:
     """一键复盘：当日 A 股全貌（七模块并行聚合）
 
     返回 indices(五大指数) / breadth(涨跌家数+涨停跌停炸板+连板梯队) /
@@ -29,7 +35,7 @@ def get_daily_review_tool(date: str = "") -> str:
     单模块失败不影响整体（见 errors/notes）。
 
     Args:
-        date: 查询日期 YYYY-MM-DD，默认今天。历史日期时板块资金流、涨跌家数自动降级。
+        date: 查询日期，格式 YYYY-MM-DD；空=今天。历史日期时板块资金流、涨跌家数自动降级。
     """
     return get_daily_review(date)
 

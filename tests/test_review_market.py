@@ -287,3 +287,19 @@ def test_breadth_zhaban_rate(monkeypatch):
     out = rm.breadth_section(date(2026, 11, 12))
     assert out["limit_up"] == 10 and out["zhaban"] == 2
     assert abs(out["zhaban_rate"] - round(2 / 12 * 100, 2)) < 1e-9
+
+
+def test_indices_section_full_ohlc(monkeypatch):
+    """需求v3 N3：indices.items 补 open/high/low/prev_close（前一根收盘）。"""
+    df = pd.concat(
+        [_hist_df("2026-11-16").assign(收盘=3500.0), _hist_df("2026-11-17")],
+        ignore_index=True,
+    )
+    monkeypatch.setattr(rm, "index_zh_a_hist", lambda symbol, **kw: df)
+    out = rm.indices_section(date(2026, 11, 17))
+    first = out["items"][0]
+    assert first["prev_close"] == 3500.0
+    assert (
+        first["open"] == 3000.0 and first["high"] == 3060.0 and first["low"] == 2990.0
+    )
+    assert first["close"] == 3050.0  # 既有字段不变

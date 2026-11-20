@@ -20,7 +20,6 @@ import logging
 from .board_quotes import fupan_boards_section
 from .kline_metrics import batch_klines
 from .lhb_aggregate import lhb_aggregate
-from .push2_client import now_iso
 from .review_common import json_err, json_err_code, json_not_ready, json_ok, parse_day
 from .review_derivatives import derivatives_section
 from .review_funds import fund_flow_section
@@ -220,7 +219,9 @@ def _fupan_v1_fetch(day: date_type, symbols: list[str], opts: dict) -> str:
     data = {
         "schema_version": "v1",
         "date": str(day),
-        "as_of": now_iso(),
+        # 契约 §7.2：as_of = 数据本身的时点 = 被请求的复盘日（该日收盘即定稿），
+        # 不是响应组装时刻（需求v3 N2；fupan 为收盘口径，当日 15:02 后调用）
+        "as_of": str(day),
         "stale": any_stale,
         "cached": False,
         "sections": sections,
